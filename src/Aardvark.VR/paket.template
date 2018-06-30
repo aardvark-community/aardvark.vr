@@ -1,0 +1,9 @@
+type project
+id Aardvark.VR
+authors Georg Haaser, Stefan Maierhofer, Harald Steinlechner
+owners Georg Haaser, Stefan Maierhofer, Harald Steinlechner
+projectUrl http://github.com/aardvark-platform
+licenseUrl http://www.apache.org/licenses/LICENSE-2.0.txt
+description
+    A virtual reality extension for the open source Aardvark rendering engine.
+include-pdbs true
