@@ -19,23 +19,31 @@ type Pose =
         isValid         : bool
     }
 
+type VRButtonKind =
+  | MenuButton  
+  | Trackpad    
+  | SystemButton
+  | Trigger     
+  | GripButton  
+
+
 type VrMessage =
     | ControllerConnected of controller : int
     | ControllerDisconnected of controller : int
 
-    | Touch of controller : int * axis : int
-    | Untouch of controller : int * axis : int
+    | Touch         of controller : int * axis : int
+    | Untouch       of controller : int * axis : int
     
-    | Press of controller : int * axis : int
-    | Unpress of controller : int * axis : int
+    | Press         of controller : int * axis : int
+    | Unpress       of controller : int * axis : int
 
-    | PressButton of controller : int * button : int
+    | PressButton   of controller : int * button : int
     | UnpressButton of controller : int * button : int
 
-    | ValueChange of controller : int * axis : int * value : V2d
-    | UpdatePose of controller : int * pose : Pose
+    | ValueChange   of controller : int * axis : int * value : V2d
+    | UpdatePose    of controller : int * pose : Pose
 
-    | PointTo of ray : Ray3d
+    | PointTo       of ray : Ray3d
 
 //type MotionState =
 //    {
@@ -319,14 +327,20 @@ type VrApp<'model, 'mmodel, 'msg> =
         update      : 'model -> VrState -> 'msg -> 'model
         initial     : 'model
         unpersist   : Unpersist<'model,'mmodel>
+        threads     : 'model -> ThreadPool<'msg>
     }
 
 type VulkanVRApplicationElm<'model, 'mmodel, 'msg>(app : VrApp<'model, 'mmodel, 'msg>, samples : int, debug : bool) =
     inherit VulkanVRApplicationLayered(samples, debug)
-    
-    let updateLock = obj()
-    let mutable model = app.initial
+
+    let initial = app.initial
+    let mutable model = initial
     let mmodel = app.unpersist.create model
+
+    let initialThreads = app.threads initial
+    let mutable currentThreads = initialThreads
+
+    let updateLock = obj()
 
     let mutable loaded = false
     let mutable state = { display = Unchecked.defaultof<Hmd>; devices = HMap.empty; renderTargetSize = V2i.Zero }
@@ -372,12 +386,41 @@ type VulkanVRApplicationElm<'model, 'mmodel, 'msg>(app : VrApp<'model, 'mmodel, 
             renderTargetSize = V2i(int w,int h)
         }
         
+    let rec emit (msg : 'msg) =
+        lock updateLock (fun _ -> 
+            state <- getState()
+            let m =  app.update model state msg
+            model <- m
+            transact (fun () -> 
+                mstate.Update state
+                app.unpersist.update mmodel m
+            )
+        )
+
+    and adjustThreads (newThreads : ThreadPool<'msg>) =
+        let merge (id : string) (oldThread : Option<Command<'msg>>) (newThread : Option<Command<'msg>>) : Option<Command<'msg>> =
+                match oldThread, newThread with
+                    | Some o, None ->
+                        o.Stop()
+                        newThread
+                    | None, Some n -> 
+                        n.Start(emit)
+                        newThread
+                    | Some o, Some n ->
+                        oldThread
+                    | None, None -> 
+                        None
+            
+        currentThreads <- ThreadPool<'msg>(HMap.choose2 merge currentThreads.store newThreads.store)
+
     let update (msg : seq<VrMessage>) =
-        lock updateLock (fun () ->
+        lock updateLock (fun _ -> 
             state <- getState()
             let msg = msg |> Seq.toList |> List.collect app.input
             let m = msg |> List.fold (fun s m -> app.update s state m) model
             model <- m
+            let newThreads = app.threads model
+            adjustThreads newThreads
             transact (fun () -> 
                 mstate.Update state
                 app.unpersist.update mmodel m
@@ -663,39 +706,48 @@ type VulkanVRApplicationElm<'model, 'mmodel, 'msg>(app : VrApp<'model, 'mmodel, 
                 | EVREventType.VREvent_ButtonTouch ->
                     let ci = int evt.trackedDeviceIndex
                     match getAxisIndex evt.data.controller with
-                        | Some ai -> 
+                        | Some ai when ci >= 0 -> 
                             updateAxis ci ai (fun old -> { old with touched = true })
+                            //Log.line "[Aardvark.VR.App] Touching Axis %A" ai
                             update [Touch(ci, ai)]
-                        | None ->
-                            ()
+                        | Some _ when ci = -1 ->
+                          Log.error "[Aardvark.VR.App] out of bounds controller index: %A" ci
+                        | _ -> ()
 
                 | EVREventType.VREvent_ButtonUntouch ->
                     let ci = int evt.trackedDeviceIndex
                     match getAxisIndex evt.data.controller with
-                        | Some ai -> 
+                        | Some ai when ci >= 0 -> 
                             updateAxis ci ai (fun old -> { old with touched = false })
                             update [Untouch(ci, ai)]
-                        | None ->
-                            ()
+                        | Some _ when ci = -1 ->
+                            Log.error "[Aardvark.VR.App] out of bounds controller index: %A" ci
+                        | _ -> ()
                     
                 | EVREventType.VREvent_ButtonPress ->
                     let ci = int evt.trackedDeviceIndex
                     match getAxisIndex evt.data.controller with
-                        | Some ai -> 
+                        | Some ai when ci >= 0 -> 
                             updateAxis ci ai (fun old -> { old with pressed = true })
+                            //Log.info "[Aardvark.VR.App] Pressing Axis %A" ai
                             update [Press(ci, ai)]
+                        | Some _ ->
+                          Log.error "[Aardvark.VR.App] out of bounds controller index: %A" ci
                         | None ->
                             let bi = int evt.data.controller.button
                             updateButton ci bi (fun old -> { old with pressed = true })
+                            Log.error "[Aardvark.VR.App] Pressing Button %A" bi
                             update [PressButton(ci, bi)]
                             ()
                     
                 | EVREventType.VREvent_ButtonUnpress ->
                     let ci = int evt.trackedDeviceIndex
                     match getAxisIndex evt.data.controller with
-                        | Some ai -> 
+                        | Some ai when ci >= 0 -> 
                             updateAxis ci ai (fun old -> { old with pressed = false })
                             update [Unpress(ci, ai)]
+                        | Some _ ->
+                          Log.error "[Aardvark.VR.App] out of bounds controller index: %A" ci
                         | None ->
                             let bi = int evt.data.controller.button
                             updateButton ci bi (fun old -> { old with pressed = false })
