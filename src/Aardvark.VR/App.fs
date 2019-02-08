@@ -367,7 +367,36 @@ type VrSystemInfo =
         hmd         : MotionState
         render      : VrRenderInfo
         getState    : unit -> VrState
+        bounds      : Option<Polygon3d>
     }
+    member x.wrapSg (sg : ISg) =
+        let hmdLocation = x.hmd.Pose |> Mod.map (fun t -> t.Forward.C3.XYZ)
+
+        let uniforms =
+            UniformProvider.ofList [
+                "ViewTrafo", x.render.viewTrafos :> IMod
+                "ProjTrafo", x.render.projTrafos :> IMod
+                "CameraLocation", hmdLocation :> IMod
+                "LightLocation", hmdLocation :> IMod
+            ]
+
+        let stencilTest =
+            StencilMode(
+                StencilOperation(
+                    StencilOperationFunction.Keep,
+                    StencilOperationFunction.Keep,
+                    StencilOperationFunction.Keep
+                ),
+                StencilFunction(
+                    StencilCompareFunction.Equal,
+                    0,
+                    0xFFFFFFFFu
+                )
+            )
+
+        Sg.UniformApplicator(uniforms, Mod.constant sg)
+        |> Sg.stencilMode (Mod.constant stencilTest)
+
 
 module MutableVrApp =
 
@@ -626,6 +655,7 @@ type VulkanVRApplication(samples : int, debug : bool) =
             hmd         = base.Hmd.MotionState
             render      = base.Info
             getState    = getState
+            bounds      = base.Chaperone
         }
 
     member x.SystemInfo = vrSystem

@@ -4,19 +4,40 @@ open Aardvark.Base
 open Aardvark.Base.Incremental
 open Aardvark.Rendering.Text
 open Aardvark.Vr
+open Aardvark.SceneGraph
 open Aardvark.UI
+open Aardvark.UI.Primitives
 open Aardvark.UI.Generic
 
 type Message =
     | SetText of string 
-    | StartVR
-    | StopVR
+    | ToggleVR
 
 module Demo =
+    open Aardvark.UI.Primitives
+    open Aardvark.Base.Rendering
     
+    let show  (att : list<string * AttributeValue<_>>) (sg : ISg<_>) =
+
+        let view (m : MCameraControllerState) =
+            let frustum = Frustum.perspective 60.0 0.1 1000.0 1.0 |> Mod.constant
+            FreeFlyController.controlledControl m id frustum (AttributeMap.ofList att) sg
+
+        let app =
+            {
+                initial = FreeFlyController.initial
+                update = FreeFlyController.update
+                view = view
+                threads = FreeFlyController.threads
+                unpersist = Unpersist.instance
+            }
+
+        subApp app
+
     let initial = 
         {
             text = "some text"
+            vr = false
         }
         
         
@@ -24,12 +45,10 @@ module Demo =
         match msg with
         | SetText t -> 
             { model with text = t }
-        | StartVR ->
-            vr.start()
-            model
-        | StopVR ->
-            vr.stop()
-            model
+        | ToggleVR ->
+            if model.vr then vr.stop()
+            else vr.start()
+            { model with vr = not model.vr }
 
     let threads (model : Model) =
         ThreadPool.empty
@@ -37,13 +56,56 @@ module Demo =
     let input (msg : VrMessage) =
         match msg with
         | VrMessage.PressButton(_,1) ->
-            [StopVR]
+            [ToggleVR]
         | _ -> 
             []
 
-    let ui (m : MModel) =
+    let ui (info : VrSystemInfo) (m : MModel) =
+        let text = m.vr |> Mod.map (function true -> "Stop VR" | false -> "Start VR")
+
+
+        let hmd =
+            m.vr |> Mod.bind (fun vr ->
+                if vr then
+                    Mod.map2 (Array.map2 (fun (v : Trafo3d) (p : Trafo3d) -> (v * p).Inverse)) info.render.viewTrafos info.render.projTrafos
+                else
+                    Mod.constant [|Trafo3d.Translation(100000.0,10000.0,1000.0)|]
+            )
+
+        let hmdSg =
+            Sg.wireBox (Mod.constant C4b.Yellow) (Mod.constant (Box3d(V3d(-1,-1,-1000), V3d(1.0,1.0,-0.9))))
+            |> Sg.instanced hmd
+            |> Sg.noEvents
+            
+
+        let chap =
+            match info.bounds with
+            | Some bounds ->
+                let arr = bounds.EdgeLines |> Seq.toArray
+                Sg.lines (Mod.constant C4b.Red) (Mod.constant arr)
+                |> Sg.noEvents
+                |> Sg.transform (Trafo3d.FromBasis(V3d.IOO, V3d.OOI, -V3d.OIO, V3d.Zero))
+            | _ ->
+                Sg.empty
+
+
+        let stuff =
+            Sg.ofList [hmdSg; chap]
+            |> Sg.shader {
+                do! DefaultSurfaces.trafo
+                do! DefaultSurfaces.vertexColor
+            }
+
         div [ style "width: 100%; height: 100%" ] [
-            textarea [ onChange SetText ] m.text
+            show [ style "width: 100%; height: 100%" ] (
+                Sg.textWithConfig TextConfig.Default m.text
+                |> Sg.noEvents
+                |> Sg.andAlso stuff
+            )
+            textarea [ style "position: fixed; top: 5px; left: 5px"; onChange SetText ] m.text
+            button [ style "position: fixed; bottom: 5px; right: 5px"; onClick (fun () -> ToggleVR) ] text
+
+
         ]
 
     let vr (info : VrSystemInfo) (m : MModel) =

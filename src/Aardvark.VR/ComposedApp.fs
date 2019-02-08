@@ -149,40 +149,43 @@ type ComposedApp<'model, 'mmodel, 'msg> =
         update      : VrState -> VrActions -> 'model -> 'msg -> 'model
         threads     : 'model -> ThreadPool<'msg>
         input       : VrMessage -> list<'msg>
-        ui          : 'mmodel -> DomNode<'msg>
+        ui          : VrSystemInfo -> 'mmodel -> DomNode<'msg>
         vr          : VrSystemInfo -> 'mmodel -> ISg<'msg>
     }
 
 module ComposedApp =
+    open Aardvark.Base.Ag
+    open Aardvark.Rendering.Text
     open Aardvark.SceneGraph
     open Aardvark.SceneGraph.Semantics
+    open Aardvark.Base.Rendering
 
-    let ofApp (app : App<'model, 'mmodel, 'msg>) =
-        {
-            initial = app.initial
-            update = fun _ _ model msg -> app.update model msg
-            threads = app.threads
-            unpersist = app.unpersist
-            input = fun _ -> []
-            ui = app.view
-            vr = fun _ _ -> Sg.noEvents Sg.empty
-        }
+    //let ofApp (app : App<'model, 'mmodel, 'msg>) =
+    //    {
+    //        initial = app.initial
+    //        update = fun _ _ model msg -> app.update model msg
+    //        threads = app.threads
+    //        unpersist = app.unpersist
+    //        input = fun _ -> []
+    //        ui = app.view
+    //        vr = fun _ _ -> Sg.noEvents Sg.empty
+    //    }
         
         
-    let toApp (app : ComposedApp<'model, 'mmodel, 'msg>) : App<'model, 'mmodel, 'msg> =
-        let emptyState =
-            {
-                VrState.devices = HMap.empty
-                VrState.display = { name = "none"; pose = Pose.none }
-                VrState.renderTargetSize = V2i(0,0)
-            }
-        {
-            initial = app.initial
-            update = fun  model msg -> app.update emptyState VrActions.nop model msg
-            threads = app.threads
-            unpersist = app.unpersist
-            view = app.ui
-        }
+    //let toApp (app : ComposedApp<'model, 'mmodel, 'msg>) : App<'model, 'mmodel, 'msg> =
+    //    let emptyState =
+    //        {
+    //            VrState.devices = HMap.empty
+    //            VrState.display = { name = "none"; pose = Pose.none }
+    //            VrState.renderTargetSize = V2i(0,0)
+    //        }
+    //    {
+    //        initial = app.initial
+    //        update = fun  model msg -> app.update emptyState VrActions.nop model msg
+    //        threads = app.threads
+    //        unpersist = app.unpersist
+    //        view = app.ui
+    //    }
 
     let start (vrapp : VulkanVRApplication) (capp : ComposedApp<'model, 'mmodel, 'msg>) =
         let mutable vr = { new IDisposable with member x.Dispose() = () }
@@ -194,26 +197,50 @@ module ComposedApp =
             {
                 initial = capp.initial
                 update = capp.update vrapp.State info
-                view = capp.ui
+                view = capp.ui vrapp.SystemInfo
                 threads = capp.threads
                 unpersist = capp.unpersist
             }
         let mmodel, mapp = app.StartAndGetMModel()
 
-        let view = capp.vr vrapp.SystemInfo mmodel :> ISg
-        let objects = view.RenderObjects()
+        let running = Mod.init false
+
+        let emptyScene =
+            Sg.textWithConfig TextConfig.Default (Mod.constant "paused...")
+            |> Sg.scale 0.3333
+            |> Sg.transform (Trafo3d.FromBasis(V3d.IOO, V3d.OOI, -V3d.OIO, V3d(0.0, 0.0, 1.0)))
+            |> vrapp.SystemInfo.wrapSg
+
+        let realScene = 
+            vrapp.SystemInfo.wrapSg (capp.vr vrapp.SystemInfo mmodel :> ISg)
+
+
+        let scene = running |> Mod.map (function true -> realScene | false -> emptyScene) |> Sg.dynamic
+        scene?Runtime <- vrapp.Runtime
+        scene?ViewportSize <- vrapp.Sizes
+        let objects = scene.RenderObjects()
+        let kill = 
+            vrapp.Start {
+                new IMutableVrApp with
+                    member x.Scene = RuntimeCommand.Render(objects)
+                    member x.Stop() = ()
+                    member x.Input msg = mapp.update Guid.Empty (capp.input msg :> seq<_>)
+            } 
+
         start <- fun () ->
-            vr.Dispose()
-            vr <- 
-                vrapp.Start {
-                    new IMutableVrApp with
-                        member x.Scene = RuntimeCommand.Render(objects)
-                        member x.Stop() = ()
-                        member x.Input msg = mapp.update Guid.Empty (capp.input msg :> seq<_>)
-                }
+            transact (fun () -> running.Value <- true)
+            //vr.Dispose()
+            //vr <- 
+            //    vrapp.Start {
+            //        new IMutableVrApp with
+            //            member x.Scene = RuntimeCommand.Render(objects)
+            //            member x.Stop() = ()
+            //            member x.Input msg = mapp.update Guid.Empty (capp.input msg :> seq<_>)
+            //    }
 
         stop <- fun () ->
-            vr.Dispose()
-            vr <- { new IDisposable with member x.Dispose() = () }
-
-        mapp
+            transact (fun () -> running.Value <- false)
+            //vr.Dispose()
+            //vr <- { new IDisposable with member x.Dispose() = () }
+            
+        { mapp with shutdown = fun () -> kill.Dispose(); mapp.shutdown() }

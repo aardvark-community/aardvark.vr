@@ -7,5 +7,6 @@ open Aardvark.Base.Incremental
 type Model =
     {
         text    : string
+        vr      : bool
     }
 

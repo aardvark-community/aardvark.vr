@@ -14,8 +14,10 @@ module Mutable =
         inherit obj()
         let mutable __current : Aardvark.Base.Incremental.IModRef<Demo.Model> = Aardvark.Base.Incremental.EqModRef<Demo.Model>(__initial) :> Aardvark.Base.Incremental.IModRef<Demo.Model>
         let _text = ResetMod.Create(__initial.text)
+        let _vr = ResetMod.Create(__initial.vr)
         
         member x.text = _text :> IMod<_>
+        member x.vr = _vr :> IMod<_>
         
         member x.Current = __current :> IMod<_>
         member x.Update(v : Demo.Model) =
@@ -23,6 +25,7 @@ module Mutable =
                 __current.Value <- v
                 
                 ResetMod.Update(_text,v.text)
+                ResetMod.Update(_vr,v.vr)
                 
         
         static member Create(__initial : Demo.Model) : MModel = MModel(__initial)
@@ -44,4 +47,10 @@ module Mutable =
                     override x.Get(r) = r.text
                     override x.Set(r,v) = { r with text = v }
                     override x.Update(r,f) = { r with text = f r.text }
+                }
+            let vr =
+                { new Lens<Demo.Model, System.Boolean>() with
+                    override x.Get(r) = r.vr
+                    override x.Set(r,v) = { r with vr = v }
+                    override x.Update(r,f) = { r with vr = f r.vr }
                 }
