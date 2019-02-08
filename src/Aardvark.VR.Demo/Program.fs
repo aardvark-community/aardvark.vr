@@ -1,10 +1,7 @@
-﻿// Learn more about F# at http://fsharp.org
-
-open System
-open Aardvark.Vr
-open Aardvark.Base
-open Aardium
+﻿open Aardvark.Base
 open Aardvark.UI
+open Aardvark.Vr
+open Aardium
 open Demo
 open Suave
 
@@ -17,7 +14,7 @@ let main argv =
     let app = new VulkanVRApplication(1, false)
     let mapp = ComposedApp.start app Demo.app
     
-    WebPart.startServer 4321 [
+    WebPart.startServerLocalhost 4321 [
         MutableApp.toWebPart app.Runtime mapp
     ]
     
