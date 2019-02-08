@@ -112,6 +112,16 @@ module Demo =
         Sg.textWithConfig TextConfig.Default m.text
         |> Sg.noEvents
 
+        
+    let pause (info : VrSystemInfo) (m : MModel) =
+        Sg.box' C4b.Red Box3d.Unit
+        |> Sg.noEvents
+        |> Sg.shader {
+            do! DefaultSurfaces.trafo
+            do! DefaultSurfaces.vertexColor
+            do! DefaultSurfaces.simpleLighting
+        }
+
     let app =
         {
             unpersist = Unpersist.instance
@@ -121,4 +131,5 @@ module Demo =
             input = input
             ui = ui
             vr = vr
+            pauseScene = Some pause
         }

@@ -151,6 +151,9 @@ type ComposedApp<'model, 'mmodel, 'msg> =
         input       : VrMessage -> list<'msg>
         ui          : VrSystemInfo -> 'mmodel -> DomNode<'msg>
         vr          : VrSystemInfo -> 'mmodel -> ISg<'msg>
+
+        pauseScene  : Option<VrSystemInfo -> 'mmodel -> ISg<'msg>>
+
     }
 
 module ComposedApp =
@@ -206,16 +209,31 @@ module ComposedApp =
         let running = Mod.init false
 
         let emptyScene =
-            Sg.textWithConfig TextConfig.Default (Mod.constant "paused...")
-            |> Sg.scale 0.3333
-            |> Sg.transform (Trafo3d.FromBasis(V3d.IOO, V3d.OOI, -V3d.OIO, V3d(0.0, 0.0, 1.0)))
-            |> vrapp.SystemInfo.wrapSg
+            match capp.pauseScene with
+            | Some scene -> 
+                scene vrapp.SystemInfo mmodel :> ISg
+            | None -> 
+                Sg.textWithConfig TextConfig.Default (Mod.constant "paused...")
+                |> Sg.scale 0.3333
+                |> Sg.transform (Trafo3d.FromBasis(V3d.IOO, V3d.OOI, -V3d.OIO, V3d(0.0, 0.0, 1.0)))
+                
 
         let realScene = 
-            vrapp.SystemInfo.wrapSg (capp.vr vrapp.SystemInfo mmodel :> ISg)
+            capp.vr vrapp.SystemInfo mmodel :> ISg
+
+        let input (msg : VrMessage) =
+            if running.Value then
+                capp.input msg
+            else
+                []
 
 
-        let scene = running |> Mod.map (function true -> realScene | false -> emptyScene) |> Sg.dynamic
+        let scene = 
+            running 
+            |> Mod.map (function true -> realScene | false -> emptyScene) 
+            |> Sg.dynamic
+            |> vrapp.SystemInfo.wrapSg
+
         scene?Runtime <- vrapp.Runtime
         scene?ViewportSize <- vrapp.Sizes
         let objects = scene.RenderObjects()
@@ -224,7 +242,7 @@ module ComposedApp =
                 new IMutableVrApp with
                     member x.Scene = RuntimeCommand.Render(objects)
                     member x.Stop() = ()
-                    member x.Input msg = mapp.update Guid.Empty (capp.input msg :> seq<_>)
+                    member x.Input msg = mapp.update Guid.Empty (input msg :> seq<_>)
             } 
 
         start <- fun () ->
