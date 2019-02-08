@@ -9,6 +9,7 @@ open Aardvark.Application.OpenVR
 open Aardvark.Base.Rendering
 open Aardvark.SceneGraph.Semantics
 open Aardvark.Base.Ag
+open System.Threading
 
 [<DomainType>]
 type Pose =
@@ -149,6 +150,15 @@ module internal Trafo =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Pose =
+
+    let none =
+        { 
+            deviceToWorld = Trafo3d.Identity
+            velocity = V3d.Zero
+            angularVelocity = V3d.Zero
+            isValid = false
+        }
+
     let ofOpenVR (pose : TrackedDevicePose_t) =
         let isValid =  pose.bDeviceIsConnected && pose.bPoseIsValid
         if isValid then
@@ -329,6 +339,479 @@ type VrApp<'model, 'mmodel, 'msg> =
         unpersist   : Unpersist<'model,'mmodel>
         threads     : 'model -> ThreadPool<'msg>
     }
+
+type IMutableVrApp =
+    abstract member Scene : RuntimeCommand
+    abstract member Input : VrMessage -> unit
+    abstract member Stop : unit -> unit
+
+type MutableVrApp<'model, 'mmodel, 'msg> =
+    {
+        updateLock  : obj
+        input       : VrMessage -> unit
+        update      : 'msg -> unit
+        mmodel      : 'mmodel
+        model       : IMod<'model>
+        scene       : RuntimeCommand
+        stop        : unit -> unit
+    }
+
+    interface IMutableVrApp with
+        member x.Scene = x.scene
+        member x.Input msg = x.input msg
+        member x.Stop() = x.stop()
+
+type VrSystemInfo =
+    {
+        signature   : IFramebufferSignature
+        hmd         : MotionState
+        render      : VrRenderInfo
+        getState    : unit -> VrState
+    }
+
+module MutableVrApp =
+
+    let empty =
+        { new IMutableVrApp with
+            member x.Scene = RuntimeCommand.Empty
+            member x.Input _ = ()
+            member x.Stop() = ()
+        }
+
+    let start (app : VrApp<'model, 'mmodel, 'msg>) (info : VrSystemInfo) =
+        let mutable model = app.initial
+        let mutable state = info.getState()
+        let mmodel = app.unpersist.create app.initial
+        let mstate = MVrState(state, info.signature.Runtime, info.signature)
+        let updateLock = obj()
+
+        
+        let initialThreads = app.threads model
+        let mutable currentThreads = ThreadPool.empty
+
+        let rec emit (msg : 'msg) =
+            lock updateLock (fun _ -> 
+                state <- info.getState()
+                let m =  app.update model state msg
+                model <- m
+                transact (fun () -> 
+                    mstate.Update state
+                    app.unpersist.update mmodel m
+                )
+            )
+
+        and adjustThreads (newThreads : ThreadPool<'msg>) =
+            let merge (id : string) (oldThread : Option<Command<'msg>>) (newThread : Option<Command<'msg>>) : Option<Command<'msg>> =
+                match oldThread, newThread with
+                    | Some o, None ->
+                        o.Stop()
+                        newThread
+                    | None, Some n -> 
+                        n.Start(emit)
+                        newThread
+                    | Some o, Some n ->
+                        oldThread
+                    | None, None -> 
+                        None
+            
+            currentThreads <- ThreadPool<'msg>(HMap.choose2 merge currentThreads.store newThreads.store)
+
+        let input (msg : VrMessage) =
+            app.input msg |> Seq.iter emit
+            
+        
+        let hmdLocation = info.hmd.Pose |> Mod.map (fun t -> t.Forward.C3.XYZ)
+
+        let uniforms =
+            UniformProvider.ofList [
+                "ViewTrafo", info.render.viewTrafos :> IMod
+                "ProjTrafo", info.render.projTrafos :> IMod
+                "CameraLocation", hmdLocation :> IMod
+                "LightLocation", hmdLocation :> IMod
+            ]
+
+        let stencilTest =
+            StencilMode(
+                StencilOperation(
+                    StencilOperationFunction.Keep,
+                    StencilOperationFunction.Keep,
+                    StencilOperationFunction.Keep
+                ),
+                StencilFunction(
+                    StencilCompareFunction.Equal,
+                    0,
+                    0xFFFFFFFFu
+                )
+            )
+
+        let scene = app.view mmodel mstate info.signature.Runtime uniforms stencilTest
+
+        adjustThreads initialThreads
+
+        let stop() =
+            adjustThreads ThreadPool.empty
+
+
+        {
+            updateLock = updateLock
+            input = input
+            update = emit
+            mmodel = mmodel
+            model = mmodel :> IMod<_>
+            scene = scene
+            stop = stop
+        }
+
+        
+type VulkanVRApplication(samples : int, debug : bool) =
+    inherit VulkanVRApplicationLayered(samples, debug)
+    
+    let mutable currentApp = MutableVrApp.empty
+        
+
+    static let sw = System.Diagnostics.Stopwatch.StartNew()
+   
+    static let toDeviceKind (clazz : ETrackedDeviceClass) =
+        match clazz with
+            | ETrackedDeviceClass.HMD -> VrDeviceKind.Hmd
+            | ETrackedDeviceClass.Controller -> VrDeviceKind.Controller
+            | ETrackedDeviceClass.TrackingReference -> VrDeviceKind.BaseStation
+            | _ -> VrDeviceKind.Unknown
+
+    static let toAxisKind (t : EVRControllerAxisType) =
+        match t with
+            | EVRControllerAxisType.k_eControllerAxis_Trigger -> VrAxisKind.Trigger
+            | EVRControllerAxisType.k_eControllerAxis_TrackPad -> VrAxisKind.Trackpad
+            | EVRControllerAxisType.k_eControllerAxis_Joystick -> VrAxisKind.Joystick
+            | _ -> VrAxisKind.None
+
+    static let getDevice (system : CVRSystem) (controllers : Aardvark.Application.OpenVR.VrDevice[]) (pulses : Dict<int, MicroTime>) (i : int) =
+        let deviceType = system.GetTrackedDeviceClass (uint32 i)
+        let kind = toDeviceKind deviceType
+
+        let model =
+            lazy (
+                match controllers |> Array.tryFind (fun d -> d.Index = i) with   
+                    | Some c -> c.Model
+                    | _ -> None
+            )
+
+        let startVibrate(dur : MicroTime) =
+            let until = sw.MicroTime + dur
+
+            match pulses.TryGetValue (int i) with
+                | (true, o) -> pulses.[int i] <- max o until
+                | _ -> pulses.[int i] <- until
+
+
+        let stopVibrate() =
+            pulses.Remove (int i) |> ignore
+
+
+        { 
+            id = int i
+            kind = kind
+            pose = { deviceToWorld = Trafo3d.Identity; velocity = V3d.Zero; angularVelocity = V3d.Zero; isValid = false }
+
+            model = model
+
+            axis = 
+                HMap.ofList [
+                    let axis0 = ETrackedDeviceProperty.Prop_Axis0Type_Int32
+                    for ai in 0 .. int OpenVR.k_unControllerStateAxisCount - 1 do
+                        let at = int axis0 + ai |> unbox<ETrackedDeviceProperty>
+
+                        let mutable err = ETrackedPropertyError.TrackedProp_Success
+                        let axisKind = system.GetInt32TrackedDeviceProperty(uint32 i, at, &err) |> unbox<EVRControllerAxisType> |> toAxisKind
+
+                        if err = ETrackedPropertyError.TrackedProp_Success then
+                            if axisKind <> VrAxisKind.None then
+                                yield ai, { id = ai; kind = axisKind; value = V2d.Zero; touched = false; pressed = false }
+                ]
+            buttons =
+                HMap.ofList [
+                    let mutable err = ETrackedPropertyError.TrackedProp_Success
+                    let supported = system.GetUint64TrackedDeviceProperty(uint32 i, ETrackedDeviceProperty.Prop_SupportedButtons_Uint64, &err)
+                                
+                    if err = ETrackedPropertyError.TrackedProp_Success then
+                        let mutable mask = 1UL
+                        for i in 0 .. 63 do
+                            if mask &&& supported <> 0UL then
+                                if i < int EVRButtonId.k_EButton_Axis0 || i > int EVRButtonId.k_EButton_Axis4 then
+                                    let kind = unbox<EVRButtonId> i
+                                    yield i, { id = i; kind = kind; pressed = false }
+                            mask <- mask <<< 1
+                                        
+                        ()
+
+                ]
+
+            startVibrate = startVibrate
+            stopVibrate = stopVibrate
+        }
+
+
+
+    let pulses = Dict<int, MicroTime>()
+    let mutable numFrames = 0
+    let mutable totalTime = MicroTime.Zero
+    let system = base.System
+    
+    let devices =
+        let controllers = base.Controllers
+        [|
+            for i in 0 .. int OpenVR.k_unMaxTrackedDeviceCount-1 do
+                yield getDevice system controllers pulses i
+        |]
+
+    let updateAxis (ci : int) (ai : int) (f : Axis -> Axis) =
+        devices.[ci] <- 
+            { devices.[ci] with 
+                axis = devices.[ci].axis |> HMap.alter ai (fun old ->
+                    match old with
+                        | Some old ->
+                            Some (f old)
+                        | None ->
+                            None
+                )
+                        
+            }
+
+    let updateButton (ci : int) (bi : int) (f : Button -> Button) =
+        devices.[ci] <- 
+            { devices.[ci] with 
+                buttons = devices.[ci].buttons |> HMap.alter bi (fun old ->
+                    match old with
+                        | Some old ->
+                            Some (f old)
+                        | None ->
+                            None
+                )
+                        
+            }
+
+    let getAxisIndex (b : VREvent_Controller_t) =
+        let d = int b.button - int EVRButtonId.k_EButton_Axis0
+        if d >= 0 && d < int OpenVR.k_unControllerStateAxisCount then
+            Some d 
+        else
+            None
+
+    let getState() =
+        let hmd = devices |> Array.find (fun d -> d.kind = VrDeviceKind.Hmd)
+        let mutable w = 0u
+        let mutable h= 0u
+        system.GetRecommendedRenderTargetSize(&w,&h)
+        { 
+            display = { name = "HMD"; pose = hmd.pose }
+            devices = 
+                devices |> Array.choose (fun d -> 
+                    if d.kind = VrDeviceKind.Controller then
+                        Some (d.id, d)      
+                    else
+                        None 
+                )
+                |> HMap.ofArray
+            renderTargetSize = V2i(int w,int h)
+        }
+
+    let mutable loaded = false
+    let mutable state = { display = { name = "HMD"; pose = Pose.none }; devices = HMap.empty; renderTargetSize = V2i.Zero }
+    let mstate = MVrState(state, base.Runtime, base.FramebufferSignature)
+    let sem = new SemaphoreSlim(1)
+
+    let vrSystem =
+        {
+            signature   = base.FramebufferSignature
+            hmd         = base.Hmd.MotionState
+            render      = base.Info
+            getState    = getState
+        }
+
+    member x.SystemInfo = vrSystem
+
+    member x.SetApp(app : IMutableVrApp) =
+        lock x (fun () ->
+            currentApp <- app
+            x.RenderTask <- app.Scene
+        )
+        
+    member x.State = getState()
+
+    override x.Render() =
+        let start = sw.MicroTime
+
+        base.Render()
+
+        let now = sw.MicroTime
+
+        let dt = now - start
+        numFrames <- numFrames + 1
+        totalTime <- totalTime + dt
+        
+        if numFrames >= 30 then
+            transact (fun () ->
+                mstate.UpdateFrameTime(totalTime / numFrames)
+            )
+            numFrames <- 0
+            totalTime <- MicroTime.Zero
+
+
+        for (KeyValue(c, time)) in Seq.toList pulses do
+            if time > now then
+                system.TriggerHapticPulse(uint32 c, 0u, char 65535us)
+            else
+                pulses.Remove c |> ignore
+
+    override x.OnLoad(info) =
+        let res = base.OnLoad(info)
+        state <- getState()
+        mstate.Update state
+        loaded <- true
+        res
+
+    override x.UpdatePoses(poses : TrackedDevicePose_t[]) =
+        if loaded then
+            if poses.Length <> devices.Length then
+                Log.warn "[OpenVR] bad pose count: { is: %A; should: %A }" poses.Length devices.Length
+
+            let cnt = min poses.Length devices.Length
+            transact (fun () ->
+                let changes = System.Collections.Generic.List<VrMessage>()
+                for i in 0 .. cnt - 1 do
+                    let mutable state = Unchecked.defaultof<VRControllerState_t>
+
+                    if system.GetControllerState(uint32 i, &state, uint32 sizeof<VRControllerState_t>) then
+                        let value (ai : int) =
+                            match ai with
+                                | 0 -> V2d(state.rAxis0.x, state.rAxis0.y)
+                                | 1 -> V2d(state.rAxis1.x, state.rAxis1.y)
+                                | 2 -> V2d(state.rAxis2.x, state.rAxis2.y)
+                                | 3 -> V2d(state.rAxis3.x, state.rAxis3.y)
+                                | 4 -> V2d(state.rAxis4.x, state.rAxis4.y)
+                                | _ -> V2d.Zero
+
+                        devices.[i] <- { 
+                            devices.[i] with
+                                axis = devices.[i].axis |> HMap.map (fun ai a -> 
+                                    let n = value ai
+                                    if a.value <> n then
+                                        changes.Add(ValueChange(i, ai, n))
+                                        { a with value = n }
+                                    else
+                                        a
+                                ) 
+                        }
+                    let pose = Pose.ofOpenVR poses.[i]
+                    devices.[i] <- { devices.[i] with pose = pose}
+                    changes.Add(UpdatePose(i, pose))
+
+                
+                if changes.Count > 0 then changes |> Seq.iter currentApp.Input
+            )
+
+    override x.ProcessEvent(evt : VREvent_t) =
+        if loaded then
+            
+            let eventType = evt.eventType |> int |> unbox<EVREventType>
+            match eventType with
+                | EVREventType.VREvent_TrackedDeviceActivated ->
+                    let id = int evt.trackedDeviceIndex
+
+                    // update the device-kind
+                    let kind = system.GetTrackedDeviceClass(evt.trackedDeviceIndex) |> toDeviceKind
+                    if devices.[id].kind <> kind then
+                        devices.[id] <- getDevice system x.Controllers pulses id
+
+                    if kind = VrDeviceKind.Controller then
+                        currentApp.Input (ControllerConnected id)
+
+                | EVREventType.VREvent_TrackedDeviceDeactivated ->
+                    let id = int evt.trackedDeviceIndex
+                    let oldKind = devices.[id].kind
+                    if oldKind <> VrDeviceKind.Unknown then
+                        devices.[id] <- { devices.[id] with kind = VrDeviceKind.Unknown }
+                       
+                    if oldKind =  VrDeviceKind.Controller then
+                        currentApp.Input (ControllerDisconnected id)
+
+
+                | EVREventType.VREvent_ButtonTouch ->
+                    let ci = int evt.trackedDeviceIndex
+                    match getAxisIndex evt.data.controller with
+                        | Some ai when ci >= 0 -> 
+                            updateAxis ci ai (fun old -> { old with touched = true })
+                            //Log.line "[Aardvark.VR.App] Touching Axis %A" ai
+                            currentApp.Input (Touch(ci, ai))
+                        | Some _ when ci = -1 ->
+                          Log.error "[Aardvark.VR.App] out of bounds controller index: %A" ci
+                        | _ -> ()
+
+                | EVREventType.VREvent_ButtonUntouch ->
+                    let ci = int evt.trackedDeviceIndex
+                    match getAxisIndex evt.data.controller with
+                        | Some ai when ci >= 0 -> 
+                            updateAxis ci ai (fun old -> { old with touched = false })
+                            currentApp.Input (Untouch(ci, ai))
+                        | Some _ when ci = -1 ->
+                            Log.error "[Aardvark.VR.App] out of bounds controller index: %A" ci
+                        | _ -> ()
+                    
+                | EVREventType.VREvent_ButtonPress ->
+                    let ci = int evt.trackedDeviceIndex
+                    match getAxisIndex evt.data.controller with
+                        | Some ai when ci >= 0 -> 
+                            updateAxis ci ai (fun old -> { old with pressed = true })
+                            //Log.info "[Aardvark.VR.App] Pressing Axis %A" ai
+                            currentApp.Input (Press(ci, ai))
+                        | Some _ ->
+                          Log.error "[Aardvark.VR.App] out of bounds controller index: %A" ci
+                        | None ->
+                            let bi = int evt.data.controller.button
+                            updateButton ci bi (fun old -> { old with pressed = true })
+                            Log.error "[Aardvark.VR.App] Pressing Button %A" bi
+                            currentApp.Input (PressButton(ci, bi))
+                            ()
+                    
+                | EVREventType.VREvent_ButtonUnpress ->
+                    let ci = int evt.trackedDeviceIndex
+                    match getAxisIndex evt.data.controller with
+                        | Some ai when ci >= 0 -> 
+                            updateAxis ci ai (fun old -> { old with pressed = false })
+                            currentApp.Input (Unpress(ci, ai))
+                        | Some _ ->
+                          Log.error "[Aardvark.VR.App] out of bounds controller index: %A" ci
+                        | None ->
+                            let bi = int evt.data.controller.button
+                            updateButton ci bi (fun old -> { old with pressed = false })
+                            currentApp.Input (UnpressButton(ci, bi))
+
+                | _ ->
+                    ()
+
+
+
+        ()
+        
+    member x.Start(mapp : IMutableVrApp) =
+        sem.Wait()
+        x.SetApp mapp
+        let thread = 
+            startThread (fun () ->
+                x.Run()
+            )
+
+        { new System.IDisposable with
+            member __.Dispose() =
+                mapp.Stop()
+                x.Shutdown()
+                thread.Join()
+                sem.Release() |> ignore
+        }
+
+    member x.Start(app : VrApp<'model, 'mmodel, 'msg>) =
+        let mapp = MutableVrApp.start app x.SystemInfo
+        x.Start(mapp)
 
 type VulkanVRApplicationElm<'model, 'mmodel, 'msg>(app : VrApp<'model, 'mmodel, 'msg>, samples : int, debug : bool) =
     inherit VulkanVRApplicationLayered(samples, debug)

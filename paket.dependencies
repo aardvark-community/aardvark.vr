@@ -11,11 +11,16 @@ nuget Aardvark.Base.Essentials              ~> 4.3.8
 nuget Aardvark.Compiler.DomainTypes         ~> 4.2.0
 nuget Aardvark.Compiler.DomainTypes.MSBuild ~> 4.2.0
 
-nuget Aardvark.SceneGraph                   ~> 4.7.3
-nuget Aardvark.Application.OpenVR           ~> 4.7.3
-nuget Aardvark.Application.OpenVR.Vulkan    ~> 4.7.3
-nuget Aardvark.Application.Slim.Vulkan      ~> 4.7.3
-nuget Aardvark.Rendering.Text               ~> 4.7.3
+nuget Aardvark.SceneGraph                   ~> 4.7.6
+nuget Aardvark.Application.OpenVR           ~> 4.7.6
+nuget Aardvark.Application.OpenVR.Vulkan    ~> 4.7.6
+nuget Aardvark.Application.Slim.Vulkan      ~> 4.7.6
+nuget Aardvark.Rendering.Text               ~> 4.7.6
+
+
+nuget Aardvark.UI                           ~> 4.4.9
+nuget Aardvark.UI.Primitives                ~> 4.4.9
+nuget Aardium                               ~> 1.0.18
 
 nuget Unofficial.OpenVR                     ~> 1.1.0
 

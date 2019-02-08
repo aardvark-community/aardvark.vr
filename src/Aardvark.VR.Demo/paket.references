@@ -4,6 +4,7 @@ Aardvark.Base.Incremental
 Aardvark.Base.FSharp
 
 Aardvark.Compiler.DomainTypes 
+Aardvark.Compiler.DomainTypes.MSBuild
 
 Aardvark.SceneGraph                
 Aardvark.Application.OpenVR        
@@ -12,5 +13,7 @@ Aardvark.Rendering.Text
 Aardvark.Application.Slim.Vulkan
 
 Aardvark.UI
+Aardvark.UI.Primitives
+Aardium
 
 Unofficial.OpenVR
