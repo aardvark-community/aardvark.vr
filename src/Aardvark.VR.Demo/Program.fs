@@ -11,7 +11,7 @@ let main argv =
     Aardvark.Init()
     Aardium.init()
 
-    let app = new VulkanVRApplication(8, false)
+    let app = VRApplication.create true 8 false
     let mapp = ComposedApp.start app Demo.app
     
     WebPart.startServerLocalhost 4321 [

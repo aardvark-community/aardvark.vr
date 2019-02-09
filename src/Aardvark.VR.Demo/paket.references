@@ -11,6 +11,7 @@ Aardvark.Application.OpenVR
 Aardvark.Application.OpenVR.Vulkan  
 Aardvark.Rendering.Text
 Aardvark.Application.Slim.Vulkan
+Aardvark.Application.Utilities
 
 Aardvark.UI
 Aardvark.UI.Primitives

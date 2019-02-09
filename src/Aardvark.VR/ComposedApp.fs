@@ -190,7 +190,7 @@ module ComposedApp =
     //        view = app.ui
     //    }
 
-    let start (vrapp : VulkanVRApplication) (capp : ComposedApp<'model, 'mmodel, 'msg>) =
+    let start (vrapp : IVrApplication) (capp : ComposedApp<'model, 'mmodel, 'msg>) =
         let mutable vr = { new IDisposable with member x.Dispose() = () }
         let mutable start = id
         let mutable stop = id
@@ -199,7 +199,7 @@ module ComposedApp =
         let app =
             {
                 initial = capp.initial
-                update = capp.update vrapp.State info
+                update = capp.update (vrapp.SystemInfo.getState()) info
                 view = capp.ui vrapp.SystemInfo
                 threads = capp.threads
                 unpersist = capp.unpersist
@@ -235,7 +235,7 @@ module ComposedApp =
             |> vrapp.SystemInfo.wrapSg
 
         scene?Runtime <- vrapp.Runtime
-        scene?ViewportSize <- vrapp.Sizes
+        scene?ViewportSize <- vrapp.Size
         let objects = scene.RenderObjects()
         let kill = 
             vrapp.Start {

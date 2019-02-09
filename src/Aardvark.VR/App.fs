@@ -10,6 +10,13 @@ open Aardvark.Base.Rendering
 open Aardvark.SceneGraph.Semantics
 open Aardvark.Base.Ag
 open System.Threading
+open System
+open System.Runtime.CompilerServices
+open Aardvark.Rendering.Vulkan
+open Aardvark.Application.Slim
+open Aardvark.Application
+
+
 
 [<DomainType>]
 type Pose =
@@ -361,10 +368,27 @@ type MutableVrApp<'model, 'mmodel, 'msg> =
         member x.Input msg = x.input msg
         member x.Stop() = x.stop()
 
+type PoseInfo =
+    {
+        Pose                : IMod<Trafo3d>
+        Velocity            : IMod<V3d>
+        AngularVelocity     : IMod<V3d>
+        IsValid             : IMod<bool>
+    }
+
+module PoseInfo =
+    let ofMotionState (m : MotionState) =
+        {
+            Pose = m.Pose
+            Velocity = m.Velocity
+            AngularVelocity = m.AngularVelocity
+            IsValid = m.IsValid
+        }
+
 type VrSystemInfo =
     {
         signature   : IFramebufferSignature
-        hmd         : MotionState
+        hmd         : PoseInfo
         render      : VrRenderInfo
         getState    : unit -> VrState
         bounds      : Option<Polygon3d>
@@ -490,6 +514,20 @@ module MutableVrApp =
             scene = scene
             stop = stop
         }
+
+type IVrApplication =
+    inherit IDisposable
+    abstract member Runtime : IRuntime
+    abstract member Size : IMod<V2i>
+    abstract member Start : IMutableVrApp -> IDisposable
+    abstract member SystemInfo : VrSystemInfo
+
+[<AbstractClass; Sealed; Extension>]
+type IVrApplicationExtensions private() =
+    [<Extension>]
+    static member Start(this : IVrApplication, app : VrApp<'model, 'mmodel, 'msg>) =
+        let mapp = MutableVrApp.start app this.SystemInfo
+        this.Start mapp
 
         
 type VulkanVRApplication(samples : int, debug : bool) =
@@ -652,7 +690,7 @@ type VulkanVRApplication(samples : int, debug : bool) =
     let vrSystem =
         {
             signature   = base.FramebufferSignature
-            hmd         = base.Hmd.MotionState
+            hmd         = PoseInfo.ofMotionState base.Hmd.MotionState
             render      = base.Info
             getState    = getState
             bounds      = base.Chaperone
@@ -842,6 +880,128 @@ type VulkanVRApplication(samples : int, debug : bool) =
     member x.Start(app : VrApp<'model, 'mmodel, 'msg>) =
         let mapp = MutableVrApp.start app x.SystemInfo
         x.Start(mapp)
+
+    interface IVrApplication with
+        member x.Start m = x.Start m
+        member x.SystemInfo = x.SystemInfo
+        member x.Runtime = x.Runtime :> IRuntime
+        member x.Size = x.Sizes 
+
+open Aardvark.Application.Utilities
+type VulkanFakeVrApplication(samples : int, debug : bool) =
+    //let app = new VulkanApplication(debug)
+
+    let boot = new SemaphoreSlim(0)
+    let mutable win = Unchecked.defaultof<_>
+    let tasks = new System.Collections.Concurrent.BlockingCollection<RuntimeCommand>(1)
+
+    let command = Mod.init RuntimeCommand.Empty
+
+
+    let run() =
+        let w = 
+            let s = samples
+            let d = debug
+            window {
+                backend Backend.Vulkan
+                display Display.Stereo
+                debug d
+                samples s
+            }
+            
+        let obj = 
+            command |> Mod.map (fun c ->
+                CommandRenderObject(RenderPass.main, Ag.emptyScope, c) :> IRenderObject
+            )
+        let sg = 
+            Sg.RenderObjectNode(ASet.ofModSingle obj) :> ISg
+            
+        w.Scene <- sg
+        win <- w
+        boot.Release() |> ignore
+        
+        w.Run()
+
+        w.Dispose()
+
+    let uiThread = 
+        let t = new Thread(ThreadStart(run), IsBackground = true, ApartmentState = ApartmentState.STA)
+        t.Start()
+        boot.Wait()
+        boot.Dispose()
+        t
+    
+
+
+
+    let view = win.View
+    let proj = win.Proj
+
+    let hmd : PoseInfo =
+        {
+            Pose = view |> Mod.map (fun arr -> arr.[0].Inverse)
+            Velocity = Mod.constant V3d.Zero
+            AngularVelocity = Mod.constant V3d.Zero
+            IsValid = Mod.constant true
+        }
+        
+
+    let info =
+        let size = V2i(1024, 768)
+        {
+            VrSystemInfo.signature = Unchecked.defaultof<_>
+            VrSystemInfo.hmd = hmd
+            VrSystemInfo.render =
+                {
+                    framebufferSize = size
+                    viewTrafos = view
+                    projTrafos = proj
+                }
+            VrSystemInfo.getState = fun () ->
+                {
+                    VrState.devices = HMap.empty
+                    VrState.display = { name = "Window"; pose = { Pose.deviceToWorld = view.GetValue().[0].Inverse; Pose.angularVelocity = V3d.Zero; Pose.velocity = V3d.Zero; Pose.isValid = true }}
+                    VrState.renderTargetSize = size
+                }
+            VrSystemInfo.bounds = None
+        }
+
+    member x.SystemInfo = info
+
+    member x.Start(mapp : IMutableVrApp) =
+        transact (fun () -> command.Value <- mapp.Scene)
+        { new IDisposable with
+            member x.Dispose() =
+                transact (fun () -> command.Value <- RuntimeCommand.Empty)
+        }
+
+
+    member x.Dispose() =
+        tasks.CompleteAdding()
+        uiThread.Join()
+
+    member x.Runtime = win.Runtime
+    member x.Size = win.Sizes 
+
+    interface IDisposable with
+        member x.Dispose() = x.Dispose()
+
+    interface IVrApplication with
+        member x.SystemInfo = x.SystemInfo
+        member x.Start m = x.Start m
+        member x.Runtime = win.Runtime
+        member x.Size = win.Sizes 
+
+
+module VRApplication =
+    let create (fake : bool) (samples : int) (debug : bool) =
+        if fake then
+            new VulkanFakeVrApplication(samples, debug) :> IVrApplication
+        else
+            try new VulkanVRApplication(samples, debug) :> IVrApplication
+            with _ -> new VulkanFakeVrApplication(samples, debug) :> IVrApplication
+
+
 
 type VulkanVRApplicationElm<'model, 'mmodel, 'msg>(app : VrApp<'model, 'mmodel, 'msg>, samples : int, debug : bool) =
     inherit VulkanVRApplicationLayered(samples, debug)
