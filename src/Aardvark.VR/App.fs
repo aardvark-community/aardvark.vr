@@ -1047,8 +1047,8 @@ module VRApplication =
         | VRDisplay.Fake ->
             new VulkanFakeVrApplication(samples, debug) :> IVrApplication
         | VRDisplay.OpenVR factor ->
-            try new VulkanVRApplication(samples, debug) :> IVrApplication
-            with _ -> new VulkanFakeVrApplication(samples, debug, ScaleFactor = factor) :> IVrApplication
+            try new VulkanVRApplication(samples, debug, ScaleFactor = factor) :> IVrApplication
+            with _ -> new VulkanFakeVrApplication(samples, debug) :> IVrApplication
 
 
 
