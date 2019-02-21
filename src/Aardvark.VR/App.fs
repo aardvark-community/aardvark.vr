@@ -993,13 +993,62 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
         member x.Size = win.Sizes 
 
 
+type VulkanNoVrApplication(debug : bool) =
+    inherit HeadlessVulkanApplication(debug)
+
+    let hmd : PoseInfo =
+        {
+            Pose = Mod.constant Trafo3d.Identity
+            Velocity = Mod.constant V3d.Zero
+            AngularVelocity = Mod.constant V3d.Zero
+            IsValid = Mod.constant false
+        }
+        
+
+    let info =
+        let size = V2i(1024, 768)
+        {
+            VrSystemInfo.signature = Unchecked.defaultof<_>
+            VrSystemInfo.hmd = hmd
+            VrSystemInfo.bounds = None
+            VrSystemInfo.render =
+                {
+                    framebufferSize = size
+                    viewTrafos = Mod.constant [| Trafo3d.Identity |]
+                    projTrafos = Mod.constant [| Trafo3d.Identity |]
+                }
+            VrSystemInfo.getState = fun () ->
+                {
+                    VrState.devices = HMap.empty
+                    VrState.display = { name = "Window"; pose = { Pose.deviceToWorld = Trafo3d.Identity; Pose.angularVelocity = V3d.Zero; Pose.velocity = V3d.Zero; Pose.isValid = false }}
+                    VrState.renderTargetSize = size
+                }
+        }
+    
+    interface IVrApplication with
+        member x.Start m = { new IDisposable with member x.Dispose() = () }
+        member x.SystemInfo = info
+        member x.Runtime = x.Runtime :> IRuntime
+        member x.Size = Mod.constant V2i.II
+
+
+[<RequireQualifiedAccess>]
+type VRDisplay =
+    | None
+    | Fake
+    | OpenVR of factor : float
+
+
 module VRApplication =
-    let create (fake : bool) (samples : int) (debug : bool) =
-        if fake then
+    let create (display : VRDisplay) (samples : int) (debug : bool) =
+        match display with
+        | VRDisplay.None ->
+            new VulkanNoVrApplication(debug) :> IVrApplication
+        | VRDisplay.Fake ->
             new VulkanFakeVrApplication(samples, debug) :> IVrApplication
-        else
+        | VRDisplay.OpenVR factor ->
             try new VulkanVRApplication(samples, debug) :> IVrApplication
-            with _ -> new VulkanFakeVrApplication(samples, debug) :> IVrApplication
+            with _ -> new VulkanFakeVrApplication(samples, debug, ScaleFactor = factor) :> IVrApplication
 
 
 
