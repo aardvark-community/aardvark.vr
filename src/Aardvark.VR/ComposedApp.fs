@@ -130,17 +130,17 @@ module MissingMediaFeatures =
                 shutdown = shutdown
                 messages = subject
             }
-        
 
 
 type VrActions =
     {
+        kind    : VRDisplayKind
         start   : unit -> unit
         stop    : unit -> unit
     }
 
 module VrActions =
-    let nop = { start = id; stop = id }
+    let nop = { kind = VRDisplayKind.None; start = id; stop = id }
 
 type ComposedApp<'model, 'mmodel, 'msg> =
     {
@@ -194,7 +194,7 @@ module ComposedApp =
         let mutable vr = { new IDisposable with member x.Dispose() = () }
         let mutable start = id
         let mutable stop = id
-        let info = { start = (fun () -> start()); stop = (fun () -> stop()) }
+        let info = { kind = vrapp.Kind; start = (fun () -> start()); stop = (fun () -> stop()) }
 
         let app =
             {

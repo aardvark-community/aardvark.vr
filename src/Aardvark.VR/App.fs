@@ -515,12 +515,20 @@ module MutableVrApp =
             stop = stop
         }
 
+
+[<RequireQualifiedAccess>]
+type VRDisplayKind =
+   | None
+   | Fake
+   | OpenVR
+
 type IVrApplication =
     inherit IDisposable
     abstract member Runtime : IRuntime
     abstract member Size : IMod<V2i>
     abstract member Start : IMutableVrApp -> IDisposable
     abstract member SystemInfo : VrSystemInfo
+    abstract member Kind : VRDisplayKind
 
 [<AbstractClass; Sealed; Extension>]
 type IVrApplicationExtensions private() =
@@ -530,8 +538,8 @@ type IVrApplicationExtensions private() =
         this.Start mapp
 
         
-type VulkanVRApplication(samples : int, debug : bool) =
-    inherit VulkanVRApplicationLayered(samples, debug)
+type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) =
+    inherit VulkanVRApplicationLayered(samples, debug, adjustSize)
     
     let mutable currentApp = MutableVrApp.empty
         
@@ -886,6 +894,7 @@ type VulkanVRApplication(samples : int, debug : bool) =
         member x.SystemInfo = x.SystemInfo
         member x.Runtime = x.Runtime :> IRuntime
         member x.Size = x.Sizes 
+        member x.Kind = VRDisplayKind.OpenVR
 
 open Aardvark.Application.Utilities
 type VulkanFakeVrApplication(samples : int, debug : bool) =
@@ -1003,7 +1012,7 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
         member x.Start m = x.Start m
         member x.Runtime = vulkanApp.Runtime :> IRuntime
         member x.Size = size
-
+        member x.Kind = VRDisplayKind.Fake
 
 type VulkanNoVrApplication(debug : bool) =
     inherit HeadlessVulkanApplication(debug)
@@ -1042,25 +1051,46 @@ type VulkanNoVrApplication(debug : bool) =
         member x.SystemInfo = info
         member x.Runtime = x.Runtime :> IRuntime
         member x.Size = Mod.constant V2i.II
+        member x.Kind = VRDisplayKind.None
 
 
 [<RequireQualifiedAccess>]
 type VRDisplay =
-    | None
-    | Fake
-    | OpenVR of factor : float
+    internal
+        | DisplayNone
+        | DisplayFake
+        | DisplayOpenVR of adjust : (V2i -> V2i)
+
+    member x.Kind =
+        match x with
+        | DisplayNone -> VRDisplayKind.None
+        | DisplayFake -> VRDisplayKind.Fake
+        | DisplayOpenVR _ -> VRDisplayKind.OpenVR
+
+    static member None = DisplayNone
+    static member Fake = DisplayFake
+    static member OpenVR (adjust : V2i -> V2i) = DisplayOpenVR adjust
+    static member OpenVR (factor : float) =
+        let adjust (v : V2i) =
+            let d = factor * V2d v
+            let s = V2i(max 1.0 d.X, max 1.0 d.Y)
+            Log.warn "rendertarget-size: %A" s
+            s
+        DisplayOpenVR adjust
+        
+            
 
 
 module VRApplication =
     let create (display : VRDisplay) (samples : int) (debug : bool) =
         match display with
-        | VRDisplay.None ->
+        | VRDisplay.DisplayNone ->
             new VulkanNoVrApplication(debug) :> IVrApplication
-        | VRDisplay.Fake ->
+        | VRDisplay.DisplayFake ->
             new VulkanFakeVrApplication(samples, debug) :> IVrApplication
-        | VRDisplay.OpenVR factor ->
-            try new VulkanVRApplication(samples, debug, ScaleFactor = factor) :> IVrApplication
-            with _ -> new VulkanFakeVrApplication(samples, debug) :> IVrApplication
+        | VRDisplay.DisplayOpenVR adjust ->
+            try new VulkanVRApplication(samples, debug, adjust) :> IVrApplication
+            with _ -> new VulkanNoVrApplication(debug) :> IVrApplication
 
 
 
