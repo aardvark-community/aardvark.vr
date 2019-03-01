@@ -237,28 +237,37 @@ module ComposedApp =
         scene?Runtime <- vrapp.Runtime
         scene?ViewportSize <- vrapp.Size
         let objects = scene.RenderObjects()
-        let kill = 
-            vrapp.Start {
-                new IMutableVrApp with
-                    member x.Scene = RuntimeCommand.Render(objects)
-                    member x.Stop() = ()
-                    member x.Input msg = mapp.update Guid.Empty (input msg :> seq<_>)
-            } 
+        //let kill = 
+        //    lazy (
+        //        vrapp.Start {
+        //            new IMutableVrApp with
+        //                member x.Scene = RuntimeCommand.Render(objects)
+        //                member x.Stop() = ()
+        //                member x.Input msg = mapp.update Guid.Empty (input msg :> seq<_>)
+        //        } 
+        //    )
+
+        let mutable vr = { new IDisposable with member x.Dispose() = () }
 
         start <- fun () ->
+            //kill.Value |> ignore
+            vr.Dispose()
             transact (fun () -> running.Value <- true)
-            //vr.Dispose()
-            //vr <- 
-            //    vrapp.Start {
-            //        new IMutableVrApp with
-            //            member x.Scene = RuntimeCommand.Render(objects)
-            //            member x.Stop() = ()
-            //            member x.Input msg = mapp.update Guid.Empty (capp.input msg :> seq<_>)
-            //    }
+            vr <- 
+                vrapp.Start {
+                    new IMutableVrApp with
+                        member x.Scene = RuntimeCommand.Render(objects)
+                        member x.Stop() = ()
+                        member x.Input msg = mapp.update Guid.Empty (capp.input msg :> seq<_>)
+                }
 
         stop <- fun () ->
             transact (fun () -> running.Value <- false)
-            //vr.Dispose()
-            //vr <- { new IDisposable with member x.Dispose() = () }
+            vr.Dispose()
+            vr <- { new IDisposable with member x.Dispose() = () }
             
-        { mapp with shutdown = fun () -> kill.Dispose(); mapp.shutdown() }
+        let shutdown() =
+            vr.Dispose()
+            mapp.shutdown()
+
+        { mapp with shutdown = shutdown }

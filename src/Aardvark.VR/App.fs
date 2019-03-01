@@ -889,10 +889,17 @@ type VulkanVRApplication(samples : int, debug : bool) =
 
 open Aardvark.Application.Utilities
 type VulkanFakeVrApplication(samples : int, debug : bool) =
-    //let app = new VulkanApplication(debug)
+    let vulkanApp = new VulkanApplication(debug)
 
     let boot = new SemaphoreSlim(0)
-    let mutable win = Unchecked.defaultof<_>
+    //let win = Unchecked.defaultof<_>
+
+
+    let win : ModRef<Option<ISimpleRenderWindow>> = Mod.init None
+    let view = win |> Mod.bind (function Some w -> w.View | None -> Mod.constant [|Trafo3d.Identity; Trafo3d.Identity|])
+    let proj = win |> Mod.bind (function Some w -> w.Proj | None -> Mod.constant [|Trafo3d.Identity; Trafo3d.Identity|])
+    let size = win |> Mod.bind (function Some w -> w.Sizes | None -> Mod.constant V2i.II)
+
     let tasks = new System.Collections.Concurrent.BlockingCollection<RuntimeCommand>(1)
 
     let command = Mod.init RuntimeCommand.Empty
@@ -902,7 +909,9 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
         let w = 
             let s = samples
             let d = debug
+            
             window {
+                app vulkanApp
                 backend Backend.Vulkan
                 display Display.Stereo
                 debug d
@@ -917,7 +926,7 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
             Sg.RenderObjectNode(ASet.ofModSingle obj) :> ISg
             
         w.Scene <- sg
-        win <- w
+        transact (fun () -> win.Value <- Some w)
         boot.Release() |> ignore
         
         w.Run()
@@ -925,17 +934,18 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
         w.Dispose()
 
     let uiThread = 
-        let t = new Thread(ThreadStart(run), IsBackground = true, ApartmentState = ApartmentState.STA)
-        t.Start()
-        boot.Wait()
-        boot.Dispose()
-        t
+        lazy (
+            let t = new Thread(ThreadStart(run), IsBackground = true, ApartmentState = ApartmentState.STA)
+            t.Start()
+            boot.Wait()
+            boot.Dispose()
+            t
+        )
     
 
 
 
-    let view = win.View
-    let proj = win.Proj
+
 
     let hmd : PoseInfo =
         {
@@ -969,6 +979,7 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
     member x.SystemInfo = info
 
     member x.Start(mapp : IMutableVrApp) =
+        uiThread.Value |> ignore
         transact (fun () -> command.Value <- mapp.Scene)
         { new IDisposable with
             member x.Dispose() =
@@ -978,10 +989,11 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
 
     member x.Dispose() =
         tasks.CompleteAdding()
-        uiThread.Join()
+        if uiThread.IsValueCreated then
+            uiThread.Value.Join()
 
-    member x.Runtime = win.Runtime
-    member x.Size = win.Sizes 
+    member x.Runtime = vulkanApp.Runtime :> IRuntime
+    member x.Size = size
 
     interface IDisposable with
         member x.Dispose() = x.Dispose()
@@ -989,8 +1001,8 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
     interface IVrApplication with
         member x.SystemInfo = x.SystemInfo
         member x.Start m = x.Start m
-        member x.Runtime = win.Runtime
-        member x.Size = win.Sizes 
+        member x.Runtime = vulkanApp.Runtime :> IRuntime
+        member x.Size = size
 
 
 type VulkanNoVrApplication(debug : bool) =
