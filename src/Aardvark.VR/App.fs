@@ -2,6 +2,7 @@
 
 open Valve.VR
 
+open Aardvark.UI
 open Aardvark.Base
 open Aardvark.Base.Incremental
 open Aardvark.SceneGraph
@@ -15,6 +16,7 @@ open System.Runtime.CompilerServices
 open Aardvark.Rendering.Vulkan
 open Aardvark.Application.Slim
 open Aardvark.Application
+
 
 
 
@@ -109,15 +111,6 @@ type VrMessage =
     | UpdatePose    of controller : int * pose : Pose
 
     | PointTo       of ray : Ray3d
-
-//type MotionState =
-//    {
-//        pose            : IMod<Trafo3d>
-//        velocity        : IMod<V3d>
-//        angularVelocity : IMod<V3d>
-//    }
-
-
 
 type VrDeviceKind =
     | Invalid = -1
@@ -307,6 +300,16 @@ module Mutable =
                 mbuttons.Update(ctrl.buttons)
                 mmodel.Value <- ctrl.model
 
+    type IMVrState =
+        abstract member Current : VrState
+        abstract member display : Hmd
+        abstract member devices : amap<int, MVrDevice>
+        abstract member renderTargetSize : V2i
+        abstract member signature : IFramebufferSignature
+        abstract member runtime : IRuntime
+        abstract member frameTime : IMod<MicroTime>
+        abstract member fps : IMod<float>
+
     type MVrState(initial : VrState) =
         let current = Mod.init initial
 
@@ -314,6 +317,7 @@ module Mutable =
         let _frameTime = Mod.init MicroTime.Zero
         let _fps = Mod.init 0.0
 
+        member x.Current = current.Value
         member x.display = current.Value.display
         member x.devices = _devices :> amap<_,_>
         member x.renderTargetSize = current.Value.renderTargetSize
@@ -337,27 +341,21 @@ module Mutable =
         static member inline Create(initial : VrState) = MVrState(initial)
         static member inline Update(m : MVrState, c : VrState) = m.Update c
 
+        interface IMVrState with
+            member x.Current = x.Current
+            member x.display = x.display
+            member x.devices = x.devices
+            member x.renderTargetSize = x.renderTargetSize
+            member x.runtime = x.runtime
+            member x.signature = x.signature
+            member x.frameTime = x.frameTime
+            member x.fps = x.fps
 
-
-
-
-type Unpersist<'model, 'mmodel> =
-    {
-        create : 'model -> 'mmodel
-        update : 'mmodel -> 'model -> unit
-    }
-
-module Unpersist =
-    let inline instance<'model, 'mmodel when 'mmodel : (static member Create : 'model -> 'mmodel) and 'mmodel : (member Update : 'model -> unit)> =
-        {
-            create = fun m -> (^mmodel : (static member Create : 'model -> 'mmodel) (m))
-            update = fun mm m -> (^mmodel : (member Update : 'model -> unit) (mm, m))
-        }
 
 type VrApp<'model, 'mmodel, 'msg> =
     {
         input       : VrMessage -> list<'msg>
-        view        : 'mmodel -> MVrState -> IRuntime -> IUniformProvider -> StencilMode -> RuntimeCommand
+        view        : 'mmodel -> IMVrState -> IRuntime -> IUniformProvider -> StencilMode -> RuntimeCommand
         update      : 'model -> VrState -> 'msg -> 'model
         initial     : 'model
         unpersist   : Unpersist<'model,'mmodel>
@@ -407,9 +405,8 @@ type VrSystemInfo =
         signature   : IFramebufferSignature
         hmd         : PoseInfo
         render      : VrRenderInfo
-        getState    : unit -> VrState
         bounds      : Option<Polygon3d>
-        devices     : aset<Aardvark.Application.OpenVR.VrDevice>
+        state       : IMVrState
     }
     member x.wrapSg (sg : ISg) =
         let hmdLocation = x.hmd.Pose |> Mod.map (fun t -> t.Forward.C3.XYZ)
@@ -451,9 +448,7 @@ module MutableVrApp =
 
     let start (app : VrApp<'model, 'mmodel, 'msg>) (info : VrSystemInfo) =
         let mutable model = app.initial
-        let mutable state = info.getState()
         let mmodel = app.unpersist.create app.initial
-        let mstate = MVrState(state)
         let updateLock = obj()
 
         
@@ -462,11 +457,9 @@ module MutableVrApp =
 
         let rec emit (msg : 'msg) =
             lock updateLock (fun _ -> 
-                state <- info.getState()
-                let m =  app.update model state msg
+                let m =  app.update model info.state.Current msg
                 model <- m
                 transact (fun () -> 
-                    mstate.Update state
                     app.unpersist.update mmodel m
                 )
             )
@@ -515,7 +508,7 @@ module MutableVrApp =
                 )
             )
 
-        let scene = app.view mmodel mstate info.signature.Runtime uniforms stencilTest
+        let scene = app.view mmodel info.state info.signature.Runtime uniforms stencilTest
 
         adjustThreads initialThreads
 
@@ -561,7 +554,6 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
     
     let mutable currentApp = MutableVrApp.empty
         
-
     static let modelCache = System.Collections.Concurrent.ConcurrentDictionary<string, Option<ISg>>()
 
     static let getModel(name : string) =
@@ -656,7 +648,6 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
             startVibrate = startVibrate
             stopVibrate = stopVibrate
         }
-
 
     let allModels =
         lazy (
@@ -781,6 +772,7 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
 
     let mutable loaded = false
     let mutable state = { display = { name = "HMD"; pose = Pose.none }; devices = HMap.empty; renderTargetSize = V2i.Zero; runtime = base.Runtime; framebuffer = base.FramebufferSignature }
+    let mstate = MVrState.Create state
     let sem = new SemaphoreSlim(1)
 
     let vrSystem =
@@ -788,9 +780,8 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
             signature   = base.FramebufferSignature
             hmd         = PoseInfo.ofMotionState base.Hmd.MotionState
             render      = base.Info
-            getState    = getState
             bounds      = base.Chaperone
-            devices     = base.ConnectedDevices
+            state       = mstate
         }
 
     member x.SystemInfo = vrSystem
@@ -830,11 +821,13 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
     override x.OnLoad(info) =
         let res = base.OnLoad(info)
         state <- getState()
+        transact (fun () -> mstate.Update(state))
         loaded <- true
         res
 
     override x.UpdatePoses(poses : TrackedDevicePose_t[]) =
         if loaded then
+            
             transact (fun () ->
                 let changes = System.Collections.Generic.List<VrMessage>()
                 for i in 0 .. poses.Length - 1 do
@@ -868,7 +861,10 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
                         { d with pose = pose}
                     )
                     
-                if changes.Count > 0 then changes |> Seq.iter currentApp.Input
+                if changes.Count > 0 then 
+                    changes |> Seq.iter currentApp.Input
+                state <- getState()
+                mstate.Update(state)
             )
 
     override x.ProcessEvent(evt : VREvent_t) =
@@ -943,9 +939,10 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
                 | _ ->
                     ()
 
-
-
-        ()
+            transact (fun () ->
+                state <- getState()
+                mstate.Update(state)
+            )
         
     member x.Start(mapp : IMutableVrApp) =
         sem.Wait()
@@ -979,8 +976,6 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
     let vulkanApp = new VulkanApplication(debug)
 
     let boot = new SemaphoreSlim(0)
-    //let win = Unchecked.defaultof<_>
-
 
     let win : ModRef<Option<ISimpleRenderWindow>> = Mod.init None
     let view = win |> Mod.bind (function Some w -> w.View | None -> Mod.constant [|Trafo3d.Identity; Trafo3d.Identity|])
@@ -1033,37 +1028,36 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
 
 
 
-
-    let hmd : PoseInfo =
-        {
-            Pose = view |> Mod.map (fun arr -> arr.[0].Inverse)
-            Velocity = Mod.constant V3d.Zero
-            AngularVelocity = Mod.constant V3d.Zero
-            IsValid = Mod.constant true
-        }
-        
-
     let info =
+        let mstate =
+            { new IMVrState with
+                member x.Current = { VrState.empty with display = { VrState.empty.display with pose = { deviceToWorld = view.GetValue().[0].Inverse; velocity = V3d.Zero; angularVelocity = V3d.Zero; isValid = true } } }
+                member x.devices = AMap.empty
+                member x.display = { VrState.empty.display with pose = { deviceToWorld = view.GetValue().[0].Inverse; velocity = V3d.Zero; angularVelocity = V3d.Zero; isValid = true } }
+                member x.renderTargetSize = size.GetValue()
+                member x.frameTime = Mod.constant (MicroTime.FromMilliseconds 10.0)
+                member x.fps = Mod.constant 100.0
+                member x.runtime = vulkanApp.Runtime :> IRuntime
+                member x.signature = Unchecked.defaultof<_>
+            }
         let size = V2i(1024, 768)
         {
             VrSystemInfo.signature = Unchecked.defaultof<_>
-            VrSystemInfo.hmd = hmd
+            VrSystemInfo.hmd =
+                {
+                    Pose = view |> Mod.map (fun arr -> arr.[0].Inverse)
+                    Velocity = Mod.constant V3d.Zero
+                    AngularVelocity = Mod.constant V3d.Zero
+                    IsValid = Mod.constant true
+                }
             VrSystemInfo.render =
                 {
                     framebufferSize = size
                     viewTrafos = view
                     projTrafos = proj
                 }
-            VrSystemInfo.getState = fun () ->
-                {
-                    VrState.runtime = vulkanApp.Runtime
-                    VrState.framebuffer =  Unchecked.defaultof<_>
-                    VrState.devices = HMap.empty
-                    VrState.display = { name = "Window"; pose = { Pose.deviceToWorld = view.GetValue().[0].Inverse; Pose.angularVelocity = V3d.Zero; Pose.velocity = V3d.Zero; Pose.isValid = true }}
-                    VrState.renderTargetSize = size
-                }
+            VrSystemInfo.state = mstate
             VrSystemInfo.bounds = None
-            VrSystemInfo.devices = ASet.empty
         }
 
     member x.SystemInfo = info
@@ -1109,6 +1103,17 @@ type VulkanNoVrApplication(debug : bool) as this =
 
     let info =
         let size = V2i(1024, 768)
+        let mstate =
+            { new IMVrState with
+                member x.Current = VrState.empty
+                member x.devices = AMap.empty
+                member x.display = VrState.empty.display
+                member x.renderTargetSize = size
+                member x.frameTime = Mod.constant (MicroTime.FromMilliseconds 10.0)
+                member x.fps = Mod.constant 100.0
+                member x.runtime = this.Runtime :> IRuntime
+                member x.signature = Unchecked.defaultof<_>
+            }
         {
             VrSystemInfo.signature = Unchecked.defaultof<_>
             VrSystemInfo.hmd = hmd
@@ -1119,15 +1124,7 @@ type VulkanNoVrApplication(debug : bool) as this =
                     viewTrafos = Mod.constant [| Trafo3d.Identity |]
                     projTrafos = Mod.constant [| Trafo3d.Identity |]
                 }
-            VrSystemInfo.getState = fun () ->
-                {
-                    VrState.runtime = this.Runtime
-                    VrState.framebuffer = Unchecked.defaultof<_>
-                    VrState.devices = HMap.empty
-                    VrState.display = { name = "Window"; pose = { Pose.deviceToWorld = Trafo3d.Identity; Pose.angularVelocity = V3d.Zero; Pose.velocity = V3d.Zero; Pose.isValid = false }}
-                    VrState.renderTargetSize = size
-                }
-            VrSystemInfo.devices = ASet.empty
+            VrSystemInfo.state = mstate
         }
     
     interface IVrApplication with

@@ -115,19 +115,18 @@ module Demo =
     let vr (info : VrSystemInfo) (m : MModel) =
     
         let deviceSgs = 
-            info.devices |> ASet.choose (fun d ->
-                if d.Type <> VrDeviceType.Hmd then
-                    match d.Model with
+            info.state.devices |> AMap.toASet |> ASet.chooseM (fun (_,d) ->
+                d.Model |> Mod.map (fun m ->
+                    match m with
                     | Some sg -> 
                         sg 
                         |> Sg.noEvents 
-                        |> Sg.trafo d.MotionState.Pose 
-                        |> Sg.onOff d.MotionState.IsValid
+                        |> Sg.trafo d.pose.deviceToWorld
+                        |> Sg.onOff d.pose.isValid
                         |> Some
                     | None -> 
-                        None
-                else    
-                    None
+                        None 
+                )
             )
             |> Sg.set
             |> Sg.shader {
