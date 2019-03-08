@@ -691,6 +691,24 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
         else
             VrDeviceKind.Invalid
 
+    let rebuildDevice (i : int) =
+        if i >= 0 && i < deviceCache.Length then
+            lock deviceCache (fun () ->
+                let o = 
+                    let o = deviceCache.[i]
+                    if o.kind <> VrDeviceKind.Invalid then Some o
+                    else None
+
+                let d = getDevice system pulses i
+                deviceCache.[i] <- d
+                if d.kind = VrDeviceKind.Invalid then
+                    o, None
+                else
+                    o, Some d
+            )
+        else
+            None, None
+
     let updateDevice (i : int) (f : VrDevice -> VrDevice) =
         if i >= 0 && i < deviceCache.Length then
             lock deviceCache (fun () ->
@@ -872,6 +890,13 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
             
             let eventType = evt.eventType |> int |> unbox<EVREventType>
             match eventType with
+                | EVREventType.VREvent_TrackedDeviceRoleChanged | EVREventType.VREvent_TrackedDeviceUpdated ->
+                    let id = int evt.trackedDeviceIndex
+                    match rebuildDevice id with
+                    | None, Some n when n.kind = VrDeviceKind.Controller -> currentApp.Input (ControllerConnected id)
+                    | Some o, None when o.kind = VrDeviceKind.Controller -> currentApp.Input (ControllerDisconnected id)
+                    | _ -> ()
+                        
                 | EVREventType.VREvent_TrackedDeviceActivated ->
                     let id = int evt.trackedDeviceIndex
                     let mutable kind = VrDeviceKind.Invalid
