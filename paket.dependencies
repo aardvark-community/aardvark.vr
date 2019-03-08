@@ -3,20 +3,20 @@ source https://api.nuget.org/v3/index.json
 
 nuget FSharp.Core                           ~> 4.3.0
 
-nuget Aardvark.Base                         ~> 4.3.8
-nuget Aardvark.Base.Incremental             ~> 4.3.8
-nuget Aardvark.Base.FSharp                  ~> 4.3.8
-nuget Aardvark.Base.Essentials              ~> 4.3.8
+nuget Aardvark.Base                         ~> 4.3.9
+nuget Aardvark.Base.Incremental             ~> 4.3.9
+nuget Aardvark.Base.FSharp                  ~> 4.3.9
+nuget Aardvark.Base.Essentials              ~> 4.3.9
 
 nuget Aardvark.Compiler.DomainTypes         ~> 4.2.0
 nuget Aardvark.Compiler.DomainTypes.MSBuild ~> 4.2.0
 
-nuget Aardvark.SceneGraph                   ~> 4.7.11
-nuget Aardvark.Application.OpenVR           ~> 4.7.11
-nuget Aardvark.Application.OpenVR.Vulkan    ~> 4.7.11
-nuget Aardvark.Application.Slim.Vulkan      ~> 4.7.11
-nuget Aardvark.Rendering.Text               ~> 4.7.11
-nuget Aardvark.Application.Utilities        ~> 4.7.11
+nuget Aardvark.SceneGraph                   ~> 4.7.13
+nuget Aardvark.Application.OpenVR           ~> 4.7.13
+nuget Aardvark.Application.OpenVR.Vulkan    ~> 4.7.13
+nuget Aardvark.Application.Slim.Vulkan      ~> 4.7.13
+nuget Aardvark.Rendering.Text               ~> 4.7.13
+nuget Aardvark.Application.Utilities        ~> 4.7.13
 
 
 nuget Aardvark.UI                           ~> 4.4.9

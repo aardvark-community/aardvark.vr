@@ -8,6 +8,7 @@ open Aardvark.SceneGraph
 open Aardvark.UI
 open Aardvark.UI.Primitives
 open Aardvark.UI.Generic
+open Aardvark.Application.OpenVR
 
 type Message =
     | SetText of string 
@@ -73,9 +74,12 @@ module Demo =
             )
 
         let hmdSg =
-            Sg.wireBox (Mod.constant C4b.Yellow) (Mod.constant (Box3d(V3d(-1,-1,-1000), V3d(1.0,1.0,-0.9))))
-            |> Sg.instanced hmd
-            |> Sg.noEvents
+            List.init 2 (fun i ->
+                Sg.wireBox (Mod.constant C4b.Yellow) (Mod.constant (Box3d(V3d(-1,-1,-1000), V3d(1.0,1.0,-0.9))))
+                |> Sg.noEvents
+                |> Sg.trafo (hmd |> Mod.map (fun t -> if i < t.Length then t.[i] else Trafo3d.Translation(100000.0,10000.0,1000.0)))
+            )
+            |> Sg.ofList
             
 
         let chap =
@@ -109,8 +113,32 @@ module Demo =
         ]
 
     let vr (info : VrSystemInfo) (m : MModel) =
+    
+        let deviceSgs = 
+            info.devices |> ASet.choose (fun d ->
+                if d.Type <> VrDeviceType.Hmd then
+                    match d.Model with
+                    | Some sg -> 
+                        sg 
+                        |> Sg.noEvents 
+                        |> Sg.trafo d.MotionState.Pose 
+                        |> Sg.onOff d.MotionState.IsValid
+                        |> Some
+                    | None -> 
+                        None
+                else    
+                    None
+            )
+            |> Sg.set
+            |> Sg.shader {
+                do! DefaultSurfaces.trafo
+                do! DefaultSurfaces.diffuseTexture
+                do! DefaultSurfaces.simpleLighting
+            }
+
         Sg.textWithConfig TextConfig.Default m.text
         |> Sg.noEvents
+        |> Sg.andAlso deviceSgs
 
         
     let pause (info : VrSystemInfo) (m : MModel) =
