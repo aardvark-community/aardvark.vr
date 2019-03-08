@@ -683,6 +683,7 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
             lock deviceCache (fun () ->
                 let d = deviceCache.[i]
                 if d.kind <> VrDeviceKind.Invalid then
+                    Log.warn "disconnect %A"  d.kind
                     deviceCache.[i] <- { d with kind = VrDeviceKind.Invalid }
                     d.kind
                 else
@@ -702,8 +703,10 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
                 let d = getDevice system pulses i
                 deviceCache.[i] <- d
                 if d.kind = VrDeviceKind.Invalid then
+                    Log.warn "disconnect %A %A" (o |> Option.map (fun d -> d.kind)) d.kind
                     o, None
                 else
+                    Log.warn "rebuild %A %A" (o |> Option.map (fun d -> d.kind)) d.kind
                     o, Some d
             )
         else
@@ -712,17 +715,18 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
     let updateDevice (i : int) (f : VrDevice -> VrDevice) =
         if i >= 0 && i < deviceCache.Length then
             lock deviceCache (fun () ->
-                let d = deviceCache.[i]
+                let o = deviceCache.[i]
                 let device = 
-                    if d.kind = VrDeviceKind.Invalid then
+                    if o.kind = VrDeviceKind.Invalid then
                         let d = getDevice system pulses i
                         deviceCache.[i] <- d
                         if d.kind = VrDeviceKind.Invalid then
                             None
                         else
+                            Log.warn "connect %A"  d.kind
                             Some d
                     else
-                        Some d
+                        Some o
                 
                 match device with
                 | Some d ->
@@ -918,8 +922,6 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
                             updateAxis ci ai (fun old -> { old with touched = true })
                             //Log.line "[Aardvark.VR.App] Touching Axis %A" ai
                             currentApp.Input (Touch(ci, ai))
-                        | Some _ when ci = -1 ->
-                          Log.error "[Aardvark.VR.App] out of bounds controller index: %A" ci
                         | _ -> ()
 
                 | EVREventType.VREvent_ButtonUntouch ->
@@ -928,8 +930,6 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
                         | Some ai when ci >= 0 -> 
                             updateAxis ci ai (fun old -> { old with touched = false })
                             currentApp.Input (Untouch(ci, ai))
-                        | Some _ when ci = -1 ->
-                            Log.error "[Aardvark.VR.App] out of bounds controller index: %A" ci
                         | _ -> ()
                     
                 | EVREventType.VREvent_ButtonPress ->
@@ -939,12 +939,9 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
                             updateAxis ci ai (fun old -> { old with pressed = true })
                             //Log.info "[Aardvark.VR.App] Pressing Axis %A" ai
                             currentApp.Input (Press(ci, ai))
-                        | Some _ ->
-                          Log.error "[Aardvark.VR.App] out of bounds controller index: %A" ci
-                        | None ->
+                        | _ ->
                             let bi = int evt.data.controller.button
                             updateButton ci bi (fun old -> { old with pressed = true })
-                            Log.error "[Aardvark.VR.App] Pressing Button %A" bi
                             currentApp.Input (PressButton(ci, bi))
                             ()
                     
@@ -954,9 +951,7 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
                         | Some ai when ci >= 0 -> 
                             updateAxis ci ai (fun old -> { old with pressed = false })
                             currentApp.Input (Unpress(ci, ai))
-                        | Some _ ->
-                          Log.error "[Aardvark.VR.App] out of bounds controller index: %A" ci
-                        | None ->
+                        | _ ->
                             let bi = int evt.data.controller.button
                             updateButton ci bi (fun old -> { old with pressed = false })
                             currentApp.Input (UnpressButton(ci, bi))
@@ -1180,7 +1175,6 @@ type VRDisplay =
         let adjust (v : V2i) =
             let d = factor * V2d v
             let s = V2i(max 1.0 d.X, max 1.0 d.Y)
-            Log.warn "rendertarget-size: %A" s
             s
         DisplayOpenVR adjust
         
