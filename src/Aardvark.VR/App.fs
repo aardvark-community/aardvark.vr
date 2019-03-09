@@ -540,6 +540,7 @@ type IVrApplication =
     abstract member Start : IMutableVrApp -> IDisposable
     abstract member SystemInfo : VrSystemInfo
     abstract member Kind : VRDisplayKind
+    abstract member Statistics : IEvent<VrSystemStats>
 
 [<AbstractClass; Sealed; Extension>]
 type IVrApplicationExtensions private() =
@@ -806,6 +807,8 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
             state       = mstate
         }
 
+    member x.Statistics = base.Statistics
+
     member x.SystemInfo = vrSystem
 
     member x.SetApp(app : IMutableVrApp) =
@@ -990,6 +993,7 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
         member x.Runtime = x.Runtime :> IRuntime
         member x.Size = x.Sizes 
         member x.Kind = VRDisplayKind.OpenVR
+        member x.Statistics = x.Statistics
 
 open Aardvark.Application.Utilities
 type VulkanFakeVrApplication(samples : int, debug : bool) =
@@ -1005,6 +1009,8 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
     let tasks = new System.Collections.Concurrent.BlockingCollection<RuntimeCommand>(1)
 
     let command = Mod.init RuntimeCommand.Empty
+
+    let evtStatistics = EventSource<VrSystemStats>()
 
 
     let run() =
@@ -1082,6 +1088,8 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
 
     member x.SystemInfo = info
 
+    member x.Statistics = evtStatistics :> IEvent<_>
+
     member x.Start(mapp : IMutableVrApp) =
         uiThread.Value |> ignore
         transact (fun () -> command.Value <- mapp.Scene)
@@ -1108,6 +1116,7 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
         member x.Runtime = vulkanApp.Runtime :> IRuntime
         member x.Size = size
         member x.Kind = VRDisplayKind.Fake
+        member x.Statistics = x.Statistics 
 
 type VulkanNoVrApplication(debug : bool) as this =
     inherit HeadlessVulkanApplication(debug)
@@ -1146,6 +1155,10 @@ type VulkanNoVrApplication(debug : bool) as this =
                 }
             VrSystemInfo.state = mstate
         }
+
+    let statistics = EventSource<VrSystemStats>()
+
+    member x.Statistics = statistics :> IEvent<_>
     
     interface IVrApplication with
         member x.Start m = { new IDisposable with member x.Dispose() = () }
@@ -1153,6 +1166,7 @@ type VulkanNoVrApplication(debug : bool) as this =
         member x.Runtime = x.Runtime :> IRuntime
         member x.Size = Mod.constant V2i.II
         member x.Kind = VRDisplayKind.None
+        member x.Statistics = x.Statistics
 
 
 [<RequireQualifiedAccess>]
