@@ -16,7 +16,7 @@ let main argv =
     
     WebPart.startServerLocalhost 4321 [
         MutableApp.toWebPart app.Runtime mapp
-    ]
+    ] |> ignore
     
     Aardium.run {
         url "http://localhost:4321"

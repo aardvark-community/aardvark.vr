@@ -13,3 +13,4 @@ bin/Debug
 /.paket/paket.exe
 /Aardvark.log
 /src/Aardvark.VR.Demo/*.domaincache
+/.paket/Paket.Restore.targets
