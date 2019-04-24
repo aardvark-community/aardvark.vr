@@ -20,8 +20,9 @@ nuget Aardvark.Rendering.Text               ~> 4.8.1
 nuget Aardvark.Application.Utilities        ~> 4.8.1
 
 
-nuget Aardvark.UI                           ~> 4.4.15
-nuget Aardvark.UI.Primitives                ~> 4.4.15
+nuget Aardvark.UI                           ~> 4.5.1
+nuget Aardvark.UI.Primitives                ~> 4.5.1
+
 nuget Aardium                               ~> 1.0.18
 
 nuget Unofficial.OpenVR                     ~> 1.1.0
