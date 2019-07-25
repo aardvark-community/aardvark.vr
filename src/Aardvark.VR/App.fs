@@ -587,7 +587,7 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
         let model =
             lazy (
                 let name = Text.StringBuilder(4096)
-                let err = Unchecked.defaultof<_>
+                let mutable err = Unchecked.defaultof<_>
                 let len = system.GetStringTrackedDeviceProperty(uint32 i, ETrackedDeviceProperty.Prop_RenderModelName_String, name, 4096u, &err)
                 if len > 0u then
                     let name = name.ToString()
