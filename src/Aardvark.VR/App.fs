@@ -670,7 +670,7 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
     let pulses = Dict<int, MicroTime>()
     let mutable numFrames = 0
     let mutable totalTime = MicroTime.Zero
-    let system = base.System
+    let system = base.System.System
 
     let deviceCache =
         [|
