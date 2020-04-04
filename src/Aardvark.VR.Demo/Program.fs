@@ -7,7 +7,6 @@ open Suave
 
 [<EntryPoint>]
 let main argv =
-    Ag.initialize()
     Aardvark.Init()
     Aardium.init()
 

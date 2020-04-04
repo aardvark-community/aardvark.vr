@@ -1,35 +1,39 @@
 framework: netstandard2.0, net471, netcoreapp2.0
 source https://api.nuget.org/v3/index.json
+storage: none
 
 
 nuget FSharp.Core ~> 4.6.2
 
-nuget Aardvark.Base             ~> 4.5.8
-nuget Aardvark.Base.Incremental ~> 4.5.8
-nuget Aardvark.Base.FSharp      ~> 4.5.8
-nuget Aardvark.Base.Essentials  ~> 4.5.8
+nuget Aardvark.Base             ~> 5.0.5
+nuget Aardvark.Base.Incremental ~> 5.0.5
+nuget Aardvark.Base.FSharp      ~> 5.0.5
+nuget Aardvark.Base.Essentials  ~> 5.0.5
 
-nuget Aardvark.Compiler.DomainTypes         ~> 4.3.0
-nuget Aardvark.Compiler.DomainTypes.MSBuild ~> 4.3.0
+nuget Adaptify.Core                     ~> 0.0.39
+nuget Adaptify.MSBuild                  ~> 0.0.39
 
-nuget Aardvark.SceneGraph                >= 4.11.0
-nuget Aardvark.Application.OpenVR        >= 4.11.0
-nuget Aardvark.Application.OpenVR.Vulkan >= 4.11.0
-nuget Aardvark.Application.Slim.Vulkan   >= 4.11.0
-nuget Aardvark.Rendering.Text            >= 4.11.0
-nuget Aardvark.Application.Utilities     >= 4.11.0
+nuget FSharp.Data.Adaptive   ~> 0.0.21
+
+nuget Aardvark.SceneGraph                ~> 5.0.3
+nuget Aardvark.Application.OpenVR        ~> 5.0.3
+nuget Aardvark.Application.OpenVR.Vulkan ~> 5.0.3
+nuget Aardvark.Application.Slim.Vulkan   ~> 5.0.3
+nuget Aardvark.Rendering.Text            ~> 5.0.3
+nuget Aardvark.Application.Utilities     ~> 5.0.3
 
 
-nuget Aardvark.UI            ~> 4.5.15
-nuget Aardvark.UI.Primitives ~> 4.5.15
+nuget Aardvark.UI            ~> 5.0.2
+nuget Aardvark.UI.Primitives ~> 5.0.2
 
-nuget Aardium ~> 1.0.21
+nuget Aardium            ~> 1.0.21
 
 nuget Unofficial.OpenVR ~> 1.1.0
 
 group Build
-framework: net45
-content: none
+framework: netstandard2.0
 source https://api.nuget.org/v3/index.json
+github aardvark-platform/aardvark.fake:v5
 
-github aardvark-platform/aardvark.fake:v4-temp
+
+github aardvark-platform/aardvark.fake:v5

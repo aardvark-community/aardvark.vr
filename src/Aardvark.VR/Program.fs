@@ -26,8 +26,8 @@ namespace Aardvark.Vr
 //            }
 //
 //        type MModel(m : Model) =
-//            let _current = Mod.init m
-//            let _value = Mod.init m.value
+//            let _current = AVal.init m
+//            let _value = AVal.init m.value
 //            let _log = Aardvark.Base.Incremental.MList<string>(m.log)
 //
 //            member x.Update(m : Model) =
@@ -36,8 +36,8 @@ namespace Aardvark.Vr
 //                _log.Update(m.log)
 //            
 //            member x.log = _log :> alist<_>
-//            member x.value = _value :> IMod<_>
-//            member x.Current = _current :> IMod<_>
+//            member x.value = _value :> aval<_>
+//            member x.Current = _current :> aval<_>
 //
 //
 //            static member Create(m : Model) = MModel(m)

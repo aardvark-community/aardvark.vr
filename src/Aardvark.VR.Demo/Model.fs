@@ -1,10 +1,12 @@
 ﻿namespace Demo
 
 open Aardvark.Base
-open Aardvark.Base.Incremental
 open Aardvark.Vr
 
-[<DomainType>]
+open FSharp.Data.Adaptive
+open Adaptify
+
+[<ModelType>]
 type Model =
     {
         text    : string

@@ -1,7 +1,6 @@
 ﻿namespace Demo
 
 open Aardvark.Base
-open Aardvark.Base.Incremental
 open Aardvark.Rendering.Text
 open Aardvark.Vr
 open Aardvark.SceneGraph
@@ -9,6 +8,8 @@ open Aardvark.UI
 open Aardvark.UI.Primitives
 open Aardvark.UI.Generic
 open Aardvark.Application.OpenVR
+
+open FSharp.Data.Adaptive
 
 type Message =
     | SetText of string 
@@ -20,8 +21,8 @@ module Demo =
     
     let show  (att : list<string * AttributeValue<_>>) (sg : ISg<_>) =
 
-        let view (m : MCameraControllerState) =
-            let frustum = Frustum.perspective 60.0 0.1 1000.0 1.0 |> Mod.constant
+        let view (m : AdaptiveCameraControllerState) =
+            let frustum = Frustum.perspective 60.0 0.1 1000.0 1.0 |> AVal.constant
             FreeFlyController.controlledControl m id frustum (AttributeMap.ofList att) sg
 
         let app =
@@ -61,23 +62,23 @@ module Demo =
         | _ -> 
             []
 
-    let ui (info : VrSystemInfo) (m : MModel) =
-        let text = m.vr |> Mod.map (function true -> "Stop VR" | false -> "Start VR")
+    let ui (info : VrSystemInfo) (m : AdaptiveModel) =
+        let text = m.vr |> AVal.map (function true -> "Stop VR" | false -> "Start VR")
 
 
         let hmd =
-            m.vr |> Mod.bind (fun vr ->
+            m.vr |> AVal.bind (fun vr ->
                 if vr then
-                    Mod.map2 (Array.map2 (fun (v : Trafo3d) (p : Trafo3d) -> (v * p).Inverse)) info.render.viewTrafos info.render.projTrafos
+                    AVal.map2 (Array.map2 (fun (v : Trafo3d) (p : Trafo3d) -> (v * p).Inverse)) info.render.viewTrafos info.render.projTrafos
                 else
-                    Mod.constant [|Trafo3d.Translation(100000.0,10000.0,1000.0)|]
+                    AVal.constant [|Trafo3d.Translation(100000.0,10000.0,1000.0)|]
             )
 
         let hmdSg =
             List.init 2 (fun i ->
-                Sg.wireBox (Mod.constant C4b.Yellow) (Mod.constant (Box3d(V3d(-1,-1,-1000), V3d(1.0,1.0,-0.9))))
+                Sg.wireBox (AVal.constant C4b.Yellow) (AVal.constant (Box3d(V3d(-1,-1,-1000), V3d(1.0,1.0,-0.9))))
                 |> Sg.noEvents
-                |> Sg.trafo (hmd |> Mod.map (fun t -> if i < t.Length then t.[i] else Trafo3d.Translation(100000.0,10000.0,1000.0)))
+                |> Sg.trafo (hmd |> AVal.map (fun t -> if i < t.Length then t.[i] else Trafo3d.Translation(100000.0,10000.0,1000.0)))
             )
             |> Sg.ofList
             
@@ -86,7 +87,7 @@ module Demo =
             match info.bounds with
             | Some bounds ->
                 let arr = bounds.EdgeLines |> Seq.toArray
-                Sg.lines (Mod.constant C4b.Red) (Mod.constant arr)
+                Sg.lines (AVal.constant C4b.Red) (AVal.constant arr)
                 |> Sg.noEvents
                 |> Sg.transform (Trafo3d.FromBasis(V3d.IOO, V3d.OOI, -V3d.OIO, V3d.Zero))
             | _ ->
@@ -112,12 +113,12 @@ module Demo =
 
         ]
 
-    let vr (info : VrSystemInfo) (m : MModel) =
+    let vr (info : VrSystemInfo) (m : AdaptiveModel) =
     
         let deviceSgs = 
-            info.state.devices |> AMap.toASet |> ASet.chooseM (fun (_,d) ->
-                d.Model |> Mod.map (fun m ->
-                    match m with
+            info.state.devices |> AMap.toASet |> ASet.chooseA (fun (_,d) ->
+                d.model |> AVal.map (fun m ->
+                    match m.Value with
                     | Some sg -> 
                         sg 
                         |> Sg.noEvents 
@@ -140,7 +141,7 @@ module Demo =
         |> Sg.andAlso deviceSgs
 
         
-    let pause (info : VrSystemInfo) (m : MModel) =
+    let pause (info : VrSystemInfo) (m : AdaptiveModel) =
         Sg.box' C4b.Red Box3d.Unit
         |> Sg.noEvents
         |> Sg.shader {

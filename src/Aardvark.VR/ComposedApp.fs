@@ -2,8 +2,8 @@
 
 open System
 open Aardvark.Base
-open Aardvark.Base.Incremental
 open Aardvark.UI
+open FSharp.Data.Adaptive
 
 [<AutoOpen>]
 module MissingMediaFeatures =
@@ -17,7 +17,7 @@ module MissingMediaFeatures =
         member app.StartAndGetMModel() =
             let l = obj()
             let initial = app.initial
-            let state = Mod.init initial
+            let state = AVal.init initial
             let mstate = app.unpersist.create initial
             let initialThreads = app.threads initial
             let node = app.view mstate
@@ -54,7 +54,7 @@ module MissingMediaFeatures =
                         | None, None -> 
                             None
             
-                currentThreads <- ThreadPool<'msg>(HMap.choose2 merge currentThreads.store newThreads.store)
+                currentThreads <- ThreadPool<'msg>(HashMap.choose2 merge currentThreads.store newThreads.store)
 
 
             and doit(msgs : list<Message<'msg>>) =
@@ -206,14 +206,14 @@ module ComposedApp =
             }
         let mmodel, mapp = app.StartAndGetMModel()
 
-        let running = Mod.init false
+        let running = AVal.init false
 
         let emptyScene =
             match capp.pauseScene with
             | Some scene -> 
                 scene vrapp.SystemInfo mmodel :> ISg
             | None -> 
-                Sg.textWithConfig TextConfig.Default (Mod.constant "paused...")
+                Sg.textWithConfig TextConfig.Default (AVal.constant "paused...")
                 |> Sg.scale 0.3333
                 |> Sg.transform (Trafo3d.FromBasis(V3d.IOO, V3d.OOI, -V3d.OIO, V3d(0.0, 0.0, 1.0)))
                 
@@ -230,13 +230,13 @@ module ComposedApp =
 
         let scene = 
             running 
-            |> Mod.map (function true -> realScene | false -> emptyScene) 
+            |> AVal.map (function true -> realScene | false -> emptyScene) 
             |> Sg.dynamic
             |> vrapp.SystemInfo.wrapSg
 
         scene?Runtime <- vrapp.Runtime
         scene?ViewportSize <- vrapp.Size
-        let objects = scene.RenderObjects()
+        let objects = scene.RenderObjects(Ag.Scope.Root)
         //let kill = 
         //    lazy (
         //        vrapp.Start {

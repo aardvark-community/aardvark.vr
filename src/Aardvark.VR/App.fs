@@ -4,7 +4,6 @@ open Valve.VR
 
 open Aardvark.UI
 open Aardvark.Base
-open Aardvark.Base.Incremental
 open Aardvark.SceneGraph
 open Aardvark.Application.OpenVR
 open Aardvark.Base.Rendering
@@ -17,345 +16,42 @@ open Aardvark.Rendering.Vulkan
 open Aardvark.Application.Slim
 open Aardvark.Application
 
+open FSharp.Data.Adaptive
+open Adaptify
 
 
-
-[<DomainType>]
-type Pose =
-    {
-        deviceToWorld   : Trafo3d
-        velocity        : V3d
-        angularVelocity : V3d
-        isValid         : bool
-    }
-
-[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
-module internal Trafo =
-    
-    let ofHmdMatrix34 (x : HmdMatrix34_t) =
-        let t = 
-            M44f(
-                 x.m0, -x.m2,   x.m1,  x.m3, 
-                -x.m8,  x.m10, -x.m9, -x.m11, 
-                 x.m4, -x.m6,   x.m5,  x.m7, 
-                 0.0f,  0.0f,   0.0f,  1.0f
-            ) 
-//        let t = 
-//            M44f(
-//                x.m0, x.m1, x.m2,  x.m3,
-//                x.m4, x.m5, x.m6,  x.m7,
-//                x.m8, x.m9, x.m10, x.m11,
-//                0.0f, 0.0f, 0.0f, 1.0f
-//            ) 
-
-        let t = M44d.op_Explicit(t)
-        Trafo3d(t,t.Inverse)
-
-    let angularVelocity (v : HmdVector3_t) =
-        // WRONG??
-        V3d(-v.v0, -v.v1, -v.v2)
-
-    let velocity (v : HmdVector3_t) =
-        V3d(v.v0, v.v2, -v.v1)
-
-    let inline inverse (t : Trafo3d) = t.Inverse
+open Aardvark.Vr
 
 
-[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
-module Pose =
+type IAdaptiveVrState =
+    abstract member Current : VrState
+    abstract member display : Hmd
+    abstract member devices : amap<int, AdaptiveVrDevice>
+    abstract member renderTargetSize : V2i
+    abstract member signature : IFramebufferSignature
+    abstract member runtime : IRuntime
+    abstract member frameTime : aval<MicroTime>
+    abstract member fps : aval<float>
 
-    let none =
-        { 
-            deviceToWorld = Trafo3d.Identity
-            velocity = V3d.Zero
-            angularVelocity = V3d.Zero
-            isValid = false
+
+module AdaptiveVrStateExtensions = 
+    let toAbstract (m : AdaptiveVrState) (frameTime : aval<MicroTime>) (fps : aval<float>) = 
+        { new IAdaptiveVrState with
+            member x.Current = m.Current.GetValue() // TODO
+            member x.display = m.display.Current.GetValue()
+            member x.devices = m.devices
+            member x.renderTargetSize = m.renderTargetSize
+            member x.signature = m.framebuffer
+            member x.runtime = m.runtime
+            member x.frameTime = frameTime
+            member x.fps = fps
         }
-
-    let ofOpenVR (pose : TrackedDevicePose_t) =
-        let isValid =  pose.bDeviceIsConnected && pose.bPoseIsValid
-        if isValid then
-            let t = Trafo.ofHmdMatrix34 pose.mDeviceToAbsoluteTracking
-
-            { 
-                deviceToWorld = Trafo.ofHmdMatrix34 pose.mDeviceToAbsoluteTracking
-                velocity = Trafo.velocity pose.vVelocity
-                angularVelocity = Trafo.angularVelocity pose.vAngularVelocity
-                isValid = true
-            }
-        else
-            { deviceToWorld = Trafo3d.Identity; velocity = V3d.Zero; angularVelocity = V3d.Zero; isValid = false}
-
-type VRButtonKind =
-  | MenuButton  
-  | Trackpad    
-  | SystemButton
-  | Trigger     
-  | GripButton  
-
-
-type VrMessage =
-    | ControllerConnected of controller : int
-    | ControllerDisconnected of controller : int
-
-    | Touch         of controller : int * axis : int
-    | Untouch       of controller : int * axis : int
-    
-    | Press         of controller : int * axis : int
-    | Unpress       of controller : int * axis : int
-
-    | PressButton   of controller : int * button : int
-    | UnpressButton of controller : int * button : int
-
-    | ValueChange   of controller : int * axis : int * value : V2d
-    | UpdatePose    of controller : int * pose : Pose
-
-    | PointTo       of ray : Ray3d
-
-type VrDeviceKind =
-    | Invalid = -1
-    | Hmd = 0
-    | Controller = 1
-    | BaseStation = 2
-    | Tracker = 3
-    | Unknown = 4
-
-type VrAxisKind =
-    | None = 0
-    | Trigger = 1
-    | Trackpad = 2
-    | Joystick = 3
-
-
-[<DomainType>]
-type Hmd =
-    {
-        name        : string
-        pose        : Pose
-    }
-    
-[<DomainType>]
-type Axis =
-    {
-        id          : int
-        kind        : VrAxisKind
-        value       : V2d
-        touched     : bool
-        pressed     : bool
-    }
-    
-[<DomainType>]
-type Button =
-    {
-        id          : int
-        kind        : EVRButtonId
-        pressed     : bool
-    }
-
-    
-[<DomainType>]
-type VrDevice =
-    {
-        id              : int
-        kind            : VrDeviceKind
-        pose            : Pose
-        axis            : hmap<int, Axis>
-        buttons         : hmap<int, Button>
-        model           : Lazy<Option<ISg>>
-        startVibrate    : MicroTime -> unit
-        stopVibrate     : unit -> unit
-    }
-    
-[<DomainType>]
-type VrState =
-    {
-        runtime         : IRuntime
-        framebuffer     : IFramebufferSignature
-        display         : Hmd
-        devices         : hmap<int, VrDevice>
-        renderTargetSize : V2i
-    }
-
-module VrState =
-    let empty =
-        {
-            runtime = Unchecked.defaultof<_>
-            framebuffer = Unchecked.defaultof<_>
-            display = { name = "HMD"; pose = Pose.none }
-            devices = HMap.empty
-            renderTargetSize = V2i(1024, 768)
-        }
-
-[<AutoOpen>]
-module Mutable =
-
-    type MPose(initial : Pose) =
-        let _current = Mod.init initial
-        let _deviceToWorld = Mod.init initial.deviceToWorld
-        let _velocity = Mod.init initial.velocity
-        let _angularVelocity = Mod.init initial.angularVelocity
-        let _isValid = Mod.init initial.isValid
-
-
-        member x.Update(pose : Pose) =
-            if not (System.Object.ReferenceEquals(pose, _current.Value)) then
-                _current.Value <- pose
-                _deviceToWorld.Value <- pose.deviceToWorld
-                _velocity.Value <- pose.velocity
-                _angularVelocity.Value <- pose.angularVelocity
-                _isValid.Value <- pose.isValid
-
-        member x.Current = _current :> IMod<_>
-        member x.deviceToWorld = _deviceToWorld :> IMod<_>
-        member x.velocity = _velocity :> IMod<_>
-        member x.angularVelocity = _angularVelocity :> IMod<_>
-        member x.isValid = _isValid :> IMod<_>
-
-        static member Create(pose : Pose) = MPose(pose)
-        static member Update(m : MPose, p : Pose) = m.Update p
-  
-    type MHmd(initial : Hmd) =
-        let _current = Mod.init initial
-        let _pose = MPose.Create initial.pose
-
-        member x.Update(hmd : Hmd) =
-            if not (System.Object.ReferenceEquals(_current.Value, hmd)) then
-                _current.Value <- hmd
-                _pose.Update(hmd.pose)
-
-        member x.Current = _current :> IMod<_>
-        member x.name = _current.Value.name
-        member x.pose = _pose
-
-        static member Update(mhmd : MHmd, hmd : Hmd) = mhmd.Update hmd
-        static member Create(hmd : Hmd) = MHmd(hmd)
-
-    type MAxis(initial : Axis) =
-        let _current = Mod.init initial
-        let _value = Mod.init initial.value
-        let _touched = Mod.init initial.touched
-        let _pressed = Mod.init initial.pressed
-
-        member x.id = _current.Value.id
-        member x.kind = _current.Value.kind
-        member x.value = _value :> IMod<_>
-        member x.touched = _touched :> IMod<_>
-        member x.pressed = _pressed :> IMod<_>
-
-        static member inline Create(initial : Axis) = MAxis(initial)
-        static member inline Update(m : MAxis, a : Axis) = m.Update a
-
-        member x.Update(axis : Axis) =
-            if not (System.Object.ReferenceEquals(_current.Value, axis)) then
-                _current.Value <- axis
-                if _value.Value <> axis.value then _value.Value <- axis.value
-                if _touched.Value <> axis.touched then _touched.Value <- axis.touched
-                if _pressed.Value <> axis.pressed then _pressed.Value <- axis.pressed
-    
-    type MButton(initial : Button) =
-        let _current = Mod.init initial
-        let _pressed = Mod.init initial.pressed
-    
-        member x.id = _current.Value.id
-        member x.kind = _current.Value.kind
-        member x.pressed = _pressed :> IMod<_>
-    
-        static member inline Create(initial : Button) = MButton(initial)
-        static member inline Update(m : MButton, a : Button) = m.Update a
-    
-        member x.Update(button : Button) =
-            if not (System.Object.ReferenceEquals(_current.Value, button)) then
-                _current.Value <- button
-                _pressed.Value <- button.pressed
-
-    type MVrDevice(initial : VrDevice) =
-        let current = Mod.init initial
-
-        let mkind = Mod.init initial.kind
-        let maxis = MMap<int, Axis, MAxis, MAxis>(initial.axis, MAxis.Create, MAxis.Update, id)
-        let mpose = MPose.Create initial.pose
-        let mbuttons = MMap<int, Button, MButton, MButton>(initial.buttons, MButton.Create, MButton.Update, id)
-        let mmodel = Mod.init initial.model
-
-        let realModel = mmodel |> Mod.map (fun l -> l.Value)
-
-        member x.id = current.Value.id
-        member x.kind = mkind :> IMod<_>
-        member x.Current = current :> IMod<_>
-        member x.pose = mpose
-        member x.axis = maxis :> amap<_,_>
-        member x.buttons = mbuttons :> amap<_,_>
-        member x.Model = realModel
-
-        static member inline Create(initial : VrDevice) = MVrDevice(initial)
-        static member inline Update(m : MVrDevice, c : VrDevice) = m.Update c
-
-        member x.Update(ctrl : VrDevice) =
-            if not (System.Object.ReferenceEquals(current.Value, ctrl)) then
-                current.Value <- ctrl
-
-                mkind.Value <- ctrl.kind
-                mpose.Update(ctrl.pose)
-                maxis.Update(ctrl.axis)
-                mbuttons.Update(ctrl.buttons)
-                mmodel.Value <- ctrl.model
-
-    type IMVrState =
-        abstract member Current : VrState
-        abstract member display : Hmd
-        abstract member devices : amap<int, MVrDevice>
-        abstract member renderTargetSize : V2i
-        abstract member signature : IFramebufferSignature
-        abstract member runtime : IRuntime
-        abstract member frameTime : IMod<MicroTime>
-        abstract member fps : IMod<float>
-
-    type MVrState(initial : VrState) =
-        let current = Mod.init initial
-
-        let _devices = MMap<int, VrDevice, MVrDevice, MVrDevice>(initial.devices, MVrDevice.Create, MVrDevice.Update, id)
-        let _frameTime = Mod.init MicroTime.Zero
-        let _fps = Mod.init 0.0
-
-        member x.Current = current.Value
-        member x.display = current.Value.display
-        member x.devices = _devices :> amap<_,_>
-        member x.renderTargetSize = current.Value.renderTargetSize
-
-        member x.signature = current.Value.framebuffer
-        member x.runtime = current.Value.runtime
-        member x.frameTime = _frameTime :> IMod<_>
-        member x.fps = _fps :> IMod<_>
-
-        member x.Update(state : VrState) =
-            if not (System.Object.ReferenceEquals(current.Value, state)) then
-                current.Value <- state
-                _devices.Update(state.devices)
-        
-            ()
-
-        member x.UpdateFrameTime(time : MicroTime) =
-            _frameTime.Value <- time
-            _fps.Value <- (if time.TotalSeconds > 0.0 then 1.0 / time.TotalSeconds else 0.0)
-           
-        static member inline Create(initial : VrState) = MVrState(initial)
-        static member inline Update(m : MVrState, c : VrState) = m.Update c
-
-        interface IMVrState with
-            member x.Current = x.Current
-            member x.display = x.display
-            member x.devices = x.devices
-            member x.renderTargetSize = x.renderTargetSize
-            member x.runtime = x.runtime
-            member x.signature = x.signature
-            member x.frameTime = x.frameTime
-            member x.fps = x.fps
 
 
 type VrApp<'model, 'mmodel, 'msg> =
     {
         input       : VrMessage -> list<'msg>
-        view        : 'mmodel -> IMVrState -> IRuntime -> IUniformProvider -> StencilMode -> RuntimeCommand
+        view        : 'mmodel -> IAdaptiveVrState -> IRuntime -> IUniformProvider -> StencilMode -> RuntimeCommand
         update      : 'model -> VrState -> 'msg -> 'model
         initial     : 'model
         unpersist   : Unpersist<'model,'mmodel>
@@ -373,7 +69,7 @@ type MutableVrApp<'model, 'mmodel, 'msg> =
         input       : VrMessage -> unit
         update      : 'msg -> unit
         mmodel      : 'mmodel
-        model       : IMod<'model>
+        model       : aval<'model>
         scene       : RuntimeCommand
         stop        : unit -> unit
     }
@@ -385,10 +81,10 @@ type MutableVrApp<'model, 'mmodel, 'msg> =
 
 type PoseInfo =
     {
-        Pose                : IMod<Trafo3d>
-        Velocity            : IMod<V3d>
-        AngularVelocity     : IMod<V3d>
-        IsValid             : IMod<bool>
+        Pose                : aval<Trafo3d>
+        Velocity            : aval<V3d>
+        AngularVelocity     : aval<V3d>
+        IsValid             : aval<bool>
     }
 
 module PoseInfo =
@@ -406,17 +102,17 @@ type VrSystemInfo =
         hmd         : PoseInfo
         render      : VrRenderInfo
         bounds      : Option<Polygon3d>
-        state       : IMVrState
+        state       : IAdaptiveVrState
     }
     member x.wrapSg (sg : ISg) =
-        let hmdLocation = x.hmd.Pose |> Mod.map (fun t -> t.Forward.C3.XYZ)
+        let hmdLocation = x.hmd.Pose |> AVal.map (fun t -> t.Forward.C3.XYZ)
 
         let uniforms =
             UniformProvider.ofList [
-                "ViewTrafo", x.render.viewTrafos :> IMod
-                "ProjTrafo", x.render.projTrafos :> IMod
-                "CameraLocation", hmdLocation :> IMod
-                "LightLocation", hmdLocation :> IMod
+                "ViewTrafo", x.render.viewTrafos :> IAdaptiveValue
+                "ProjTrafo", x.render.projTrafos :> IAdaptiveValue
+                "CameraLocation", hmdLocation :> IAdaptiveValue
+                "LightLocation", hmdLocation :> IAdaptiveValue
             ]
 
         let stencilTest =
@@ -433,8 +129,8 @@ type VrSystemInfo =
                 )
             )
 
-        Sg.UniformApplicator(uniforms, Mod.constant sg)
-        |> Sg.stencilMode (Mod.constant stencilTest)
+        Sg.UniformApplicator(uniforms, AVal.constant sg)
+        |> Sg.stencilMode (AVal.constant stencilTest)
 
 
 module MutableVrApp =
@@ -448,7 +144,7 @@ module MutableVrApp =
 
     let start (app : VrApp<'model, 'mmodel, 'msg>) (info : VrSystemInfo) =
         let mutable model = app.initial
-        let mmodel = app.unpersist.create app.initial
+        let mmodel = app.unpersist.init app.initial
         let updateLock = obj()
 
         
@@ -457,7 +153,7 @@ module MutableVrApp =
 
         let rec emit (msg : 'msg) =
             lock updateLock (fun _ -> 
-                let m =  app.update model info.state.Current msg
+                let m =  app.update model (info.state.Current) msg
                 model <- m
                 transact (fun () -> 
                     app.unpersist.update mmodel m
@@ -478,20 +174,20 @@ module MutableVrApp =
                     | None, None -> 
                         None
             
-            currentThreads <- ThreadPool<'msg>(HMap.choose2 merge currentThreads.store newThreads.store)
+            currentThreads <- ThreadPool<'msg>(HashMap.choose2 merge currentThreads.store newThreads.store)
 
         let input (msg : VrMessage) =
             app.input msg |> Seq.iter emit
             
         
-        let hmdLocation = info.hmd.Pose |> Mod.map (fun t -> t.Forward.C3.XYZ)
+        let hmdLocation = info.hmd.Pose |> AVal.map (fun t -> t.Forward.C3.XYZ)
 
         let uniforms =
             UniformProvider.ofList [
-                "ViewTrafo", info.render.viewTrafos :> IMod
-                "ProjTrafo", info.render.projTrafos :> IMod
-                "CameraLocation", hmdLocation :> IMod
-                "LightLocation", hmdLocation :> IMod
+                "ViewTrafo", info.render.viewTrafos :> IAdaptiveValue
+                "ProjTrafo", info.render.projTrafos :> IAdaptiveValue
+                "CameraLocation", hmdLocation :> IAdaptiveValue
+                "LightLocation", hmdLocation :> IAdaptiveValue
             ]
 
         let stencilTest =
@@ -521,7 +217,7 @@ module MutableVrApp =
             input = input
             update = emit
             mmodel = mmodel
-            model = mmodel :> IMod<_>
+            model = mmodel :> aval<_>
             scene = scene
             stop = stop
         }
@@ -536,7 +232,7 @@ type VRDisplayKind =
 type IVrApplication =
     inherit IDisposable
     abstract member Runtime : IRuntime
-    abstract member Size : IMod<V2i>
+    abstract member Size : aval<V2i>
     abstract member Start : IMutableVrApp -> IDisposable
     abstract member SystemInfo : VrSystemInfo
     abstract member Kind : VRDisplayKind
@@ -616,7 +312,7 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
             model = model
 
             axis = 
-                HMap.ofList [
+                HashMap.ofList [
                     let axis0 = ETrackedDeviceProperty.Prop_Axis0Type_Int32
                     for ai in 0 .. int OpenVR.k_unControllerStateAxisCount - 1 do
                         let at = int axis0 + ai |> unbox<ETrackedDeviceProperty>
@@ -629,7 +325,7 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
                                 yield ai, { id = ai; kind = axisKind; value = V2d.Zero; touched = false; pressed = false }
                 ]
             buttons =
-                HMap.ofList [
+                HashMap.ofList [
                     let mutable err = ETrackedPropertyError.TrackedProp_Success
                     let supported = system.GetUint64TrackedDeviceProperty(uint32 i, ETrackedDeviceProperty.Prop_SupportedButtons_Uint64, &err)
                                 
@@ -739,7 +435,7 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
     let updateAxis (ci : int) (ai : int) (f : Axis -> Axis) =
         updateDevice ci (fun d ->
             { d with 
-                axis = d.axis |> HMap.alter ai (fun old ->
+                axis = d.axis |> HashMap.alter ai (fun old ->
                     match old with
                         | Some old ->
                             Some (f old)
@@ -752,7 +448,7 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
     let updateButton (ci : int) (bi : int) (f : Button -> Button) =
         updateDevice ci (fun d ->
             { d with 
-                buttons = d.buttons |> HMap.alter bi (fun old ->
+                buttons = d.buttons |> HashMap.alter bi (fun old ->
                     match old with
                         | Some old ->
                             Some (f old)
@@ -788,15 +484,18 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
                         else
                             None 
                     )
-                    |> HMap.ofArray
+                    |> HashMap.ofArray
                 renderTargetSize = size
             }
         )
 
     let mutable loaded = false
-    let mutable state = { display = { name = "HMD"; pose = Pose.none }; devices = HMap.empty; renderTargetSize = V2i.Zero; runtime = base.Runtime; framebuffer = base.FramebufferSignature }
-    let mstate = MVrState.Create state
+    let mutable state = { display = { name = "HMD"; pose = Pose.none }; devices = HashMap.empty; renderTargetSize = V2i.Zero; runtime = base.Runtime; framebuffer = base.FramebufferSignature }
+    let mstate = AdaptiveVrState.Create state
     let sem = new SemaphoreSlim(1)
+    let _frameTime = AVal.init MicroTime.Zero
+    let _fps = AVal.init 0.0
+
 
     let vrSystem =
         {
@@ -804,8 +503,12 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
             hmd         = PoseInfo.ofMotionState base.Hmd.MotionState
             render      = base.Info
             bounds      = base.Chaperone
-            state       = mstate
+            state       = AdaptiveVrStateExtensions.toAbstract mstate _frameTime _fps
         }
+
+    member x.UpdateFrameTime(time : MicroTime) =
+        _frameTime.Value <- time
+        _fps.Value <- (if time.TotalSeconds > 0.0 then 1.0 / time.TotalSeconds else 0.0)
 
     member x.Statistics = base.Statistics
 
@@ -831,6 +534,8 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
         let dt = now - start
         numFrames <- numFrames + 1
         totalTime <- totalTime + dt
+
+        x.UpdateFrameTime(dt)
         
         if numFrames >= 30 then
             numFrames <- 0
@@ -872,7 +577,7 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
 
                             d <- {
                                 d with
-                                    axis = d.axis |> HMap.map (fun ai a -> 
+                                    axis = d.axis |> HashMap.map (fun ai a -> 
                                         let n = value ai
                                         if a.value <> n then
                                             changes.Add(ValueChange(i, ai, n))
@@ -1001,14 +706,14 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
 
     let boot = new SemaphoreSlim(0)
 
-    let win : ModRef<Option<ISimpleRenderWindow>> = Mod.init None
-    let view = win |> Mod.bind (function Some w -> w.View | None -> Mod.constant [|Trafo3d.Identity; Trafo3d.Identity|])
-    let proj = win |> Mod.bind (function Some w -> w.Proj | None -> Mod.constant [|Trafo3d.Identity; Trafo3d.Identity|])
-    let size = win |> Mod.bind (function Some w -> w.Sizes | None -> Mod.constant V2i.II)
+    let win : ChangeableValue<Option<ISimpleRenderWindow>> = AVal.init None
+    let view = win |> AVal.bind (function Some w -> w.View | None -> AVal.constant [|Trafo3d.Identity; Trafo3d.Identity|])
+    let proj = win |> AVal.bind (function Some w -> w.Proj | None -> AVal.constant [|Trafo3d.Identity; Trafo3d.Identity|])
+    let size = win |> AVal.bind (function Some w -> w.Sizes | None -> AVal.constant V2i.II)
 
     let tasks = new System.Collections.Concurrent.BlockingCollection<RuntimeCommand>(1)
 
-    let command = Mod.init RuntimeCommand.Empty
+    let command = AVal.init RuntimeCommand.Empty
 
     let evtStatistics = EventSource<VrSystemStats>()
 
@@ -1027,11 +732,11 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
             }
             
         let obj = 
-            command |> Mod.map (fun c ->
-                CommandRenderObject(RenderPass.main, Ag.emptyScope, c) :> IRenderObject
+            command |> AVal.map (fun c ->
+                [CommandRenderObject(RenderPass.main, Ag.Scope.Root, c) :> IRenderObject]
             )
         let sg = 
-            Sg.RenderObjectNode(ASet.ofModSingle obj) :> ISg
+            Sg.RenderObjectNode(ASet.ofAVal obj) :> ISg
             
         w.Scene <- sg
         transact (fun () -> win.Value <- Some w)
@@ -1056,13 +761,13 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
 
     let info =
         let mstate =
-            { new IMVrState with
+            { new IAdaptiveVrState with
                 member x.Current = { VrState.empty with display = { VrState.empty.display with pose = { deviceToWorld = view.GetValue().[0].Inverse; velocity = V3d.Zero; angularVelocity = V3d.Zero; isValid = true } } }
                 member x.devices = AMap.empty
                 member x.display = { VrState.empty.display with pose = { deviceToWorld = view.GetValue().[0].Inverse; velocity = V3d.Zero; angularVelocity = V3d.Zero; isValid = true } }
                 member x.renderTargetSize = size.GetValue()
-                member x.frameTime = Mod.constant (MicroTime.FromMilliseconds 10.0)
-                member x.fps = Mod.constant 100.0
+                member x.frameTime = AVal.constant (MicroTime.FromMilliseconds 10.0)
+                member x.fps = AVal.constant 100.0
                 member x.runtime = vulkanApp.Runtime :> IRuntime
                 member x.signature = Unchecked.defaultof<_>
             }
@@ -1071,10 +776,10 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
             VrSystemInfo.signature = Unchecked.defaultof<_>
             VrSystemInfo.hmd =
                 {
-                    Pose = view |> Mod.map (fun arr -> arr.[0].Inverse)
-                    Velocity = Mod.constant V3d.Zero
-                    AngularVelocity = Mod.constant V3d.Zero
-                    IsValid = Mod.constant true
+                    Pose = view |> AVal.map (fun arr -> arr.[0].Inverse)
+                    Velocity = AVal.constant V3d.Zero
+                    AngularVelocity = AVal.constant V3d.Zero
+                    IsValid = AVal.constant true
                 }
             VrSystemInfo.render =
                 {
@@ -1123,23 +828,23 @@ type VulkanNoVrApplication(debug : bool) as this =
 
     let hmd : PoseInfo =
         {
-            Pose = Mod.constant Trafo3d.Identity
-            Velocity = Mod.constant V3d.Zero
-            AngularVelocity = Mod.constant V3d.Zero
-            IsValid = Mod.constant false
+            Pose = AVal.constant Trafo3d.Identity
+            Velocity = AVal.constant V3d.Zero
+            AngularVelocity = AVal.constant V3d.Zero
+            IsValid = AVal.constant false
         }
         
 
     let info =
         let size = V2i(1024, 768)
         let mstate =
-            { new IMVrState with
+            { new IAdaptiveVrState with
                 member x.Current = VrState.empty
                 member x.devices = AMap.empty
                 member x.display = VrState.empty.display
                 member x.renderTargetSize = size
-                member x.frameTime = Mod.constant (MicroTime.FromMilliseconds 10.0)
-                member x.fps = Mod.constant 100.0
+                member x.frameTime = AVal.constant (MicroTime.FromMilliseconds 10.0)
+                member x.fps = AVal.constant 100.0
                 member x.runtime = this.Runtime :> IRuntime
                 member x.signature = Unchecked.defaultof<_>
             }
@@ -1150,8 +855,8 @@ type VulkanNoVrApplication(debug : bool) as this =
             VrSystemInfo.render =
                 {
                     framebufferSize = size
-                    viewTrafos = Mod.constant [| Trafo3d.Identity |]
-                    projTrafos = Mod.constant [| Trafo3d.Identity |]
+                    viewTrafos = AVal.constant [| Trafo3d.Identity |]
+                    projTrafos = AVal.constant [| Trafo3d.Identity |]
                 }
             VrSystemInfo.state = mstate
         }
@@ -1164,7 +869,7 @@ type VulkanNoVrApplication(debug : bool) as this =
         member x.Start m = { new IDisposable with member x.Dispose() = () }
         member x.SystemInfo = info
         member x.Runtime = x.Runtime :> IRuntime
-        member x.Size = Mod.constant V2i.II
+        member x.Size = AVal.constant V2i.II
         member x.Kind = VRDisplayKind.None
         member x.Statistics = x.Statistics
 

@@ -3,8 +3,8 @@ Aardvark.Base
 Aardvark.Base.Incremental
 Aardvark.Base.FSharp
 
-Aardvark.Compiler.DomainTypes 
-Aardvark.Compiler.DomainTypes.MSBuild
+FSharp.Data.Adaptive
+Adaptify.MSBuild
 
 Aardvark.SceneGraph                
 Aardvark.Application.OpenVR        
