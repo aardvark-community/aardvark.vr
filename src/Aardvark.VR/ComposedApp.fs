@@ -38,7 +38,7 @@ module ComposedApp =
     open Aardvark.Base.Rendering
 
 
-    let start' (vrapp : IVrApplication) (running : bool) (capp : ComposedApp<'model, 'mmodel, 'msg>) : MutableApp<'model,'msg> =
+    let start' (vrapp : IVrApplication) (startRunning : bool) (capp : ComposedApp<'model, 'mmodel, 'msg>) : MutableApp<'model,'msg> =
         let mutable vr = { new IDisposable with member x.Dispose() = () }
         let mutable start = id
         let mutable stop = id
@@ -54,7 +54,7 @@ module ComposedApp =
             }
         let mmodel, mapp = app.startAndGetState()
 
-        let running = AVal.init running
+        let running = AVal.init false
 
         let emptyScene =
             match capp.pauseScene with
@@ -113,6 +113,8 @@ module ComposedApp =
             transact (fun () -> running.Value <- false)
             vr.Dispose()
             vr <- { new IDisposable with member x.Dispose() = () }
+
+        if startRunning then start ()
             
         let shutdown() =
             vr.Dispose()
