@@ -700,6 +700,464 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
         member x.Kind = VRDisplayKind.OpenVR
         member x.Statistics = x.Statistics
 
+
+type GLVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) as this =
+    inherit OpenGlVRApplicationLayered(samples, debug, adjustSize)
+    
+    let mutable currentApp = MutableVrApp.empty
+        
+    static let modelCache = System.Collections.Concurrent.ConcurrentDictionary<string, Option<ISg>>()
+
+    static let getModel(name : string) =
+        modelCache.GetOrAdd(name, fun name ->
+            OpenVR.RenderModels.load name
+        )
+
+    static let sw = System.Diagnostics.Stopwatch.StartNew()
+   
+    static let toDeviceKind (clazz : ETrackedDeviceClass) =
+        match clazz with
+            | ETrackedDeviceClass.Invalid -> VrDeviceKind.Invalid
+            | ETrackedDeviceClass.HMD -> VrDeviceKind.Hmd
+            | ETrackedDeviceClass.Controller -> VrDeviceKind.Controller
+            | ETrackedDeviceClass.TrackingReference -> VrDeviceKind.BaseStation
+            | ETrackedDeviceClass.GenericTracker -> VrDeviceKind.Tracker
+            | _ -> VrDeviceKind.Unknown
+
+    static let toAxisKind (t : EVRControllerAxisType) =
+        match t with
+            | EVRControllerAxisType.k_eControllerAxis_Trigger -> VrAxisKind.Trigger
+            | EVRControllerAxisType.k_eControllerAxis_TrackPad -> VrAxisKind.Trackpad
+            | EVRControllerAxisType.k_eControllerAxis_Joystick -> VrAxisKind.Joystick
+            | _ -> VrAxisKind.None
+
+    static let getDevice (system : CVRSystem) (pulses : Dict<int, MicroTime>) (i : int) =
+        let deviceType = system.GetTrackedDeviceClass (uint32 i)
+        let kind = toDeviceKind deviceType
+
+        let model =
+            lazy (
+                let name = Text.StringBuilder(4096)
+                let mutable err = Unchecked.defaultof<_>
+                let len = system.GetStringTrackedDeviceProperty(uint32 i, ETrackedDeviceProperty.Prop_RenderModelName_String, name, 4096u, &err)
+                if len > 0u then
+                    let name = name.ToString()
+                    getModel name
+                else
+                    None
+            )
+
+        let startVibrate(dur : MicroTime) =
+            let until = sw.MicroTime + dur
+
+            match pulses.TryGetValue (int i) with
+                | (true, o) -> pulses.[int i] <- max o until
+                | _ -> pulses.[int i] <- until
+
+
+        let stopVibrate() =
+            pulses.Remove (int i) |> ignore
+
+
+        { 
+            id = int i
+            kind = kind
+            pose = { deviceToWorld = Trafo3d.Identity; velocity = V3d.Zero; angularVelocity = V3d.Zero; isValid = false }
+
+            model = model
+
+            axis = 
+                HashMap.ofList [
+                    let axis0 = ETrackedDeviceProperty.Prop_Axis0Type_Int32
+                    for ai in 0 .. int OpenVR.k_unControllerStateAxisCount - 1 do
+                        let at = int axis0 + ai |> unbox<ETrackedDeviceProperty>
+
+                        let mutable err = ETrackedPropertyError.TrackedProp_Success
+                        let axisKind = system.GetInt32TrackedDeviceProperty(uint32 i, at, &err) |> unbox<EVRControllerAxisType> |> toAxisKind
+
+                        if err = ETrackedPropertyError.TrackedProp_Success then
+                            if axisKind <> VrAxisKind.None then
+                                yield ai, { id = ai; kind = axisKind; value = V2d.Zero; touched = false; pressed = false }
+                ]
+            buttons =
+                HashMap.ofList [
+                    let mutable err = ETrackedPropertyError.TrackedProp_Success
+                    let supported = system.GetUint64TrackedDeviceProperty(uint32 i, ETrackedDeviceProperty.Prop_SupportedButtons_Uint64, &err)
+                                
+                    if err = ETrackedPropertyError.TrackedProp_Success then
+                        let mutable mask = 1UL
+                        for i in 0 .. 63 do
+                            if mask &&& supported <> 0UL then
+                                if i < int EVRButtonId.k_EButton_Axis0 || i > int EVRButtonId.k_EButton_Axis4 then
+                                    let kind = unbox<EVRButtonId> i
+                                    yield i, { id = i; kind = kind; pressed = false }
+                            mask <- mask <<< 1
+                                        
+                        ()
+
+                ]
+
+            startVibrate = startVibrate
+            stopVibrate = stopVibrate
+        }
+
+    let allModels =
+        lazy (
+            Map.ofList [
+                let cnt = OpenVR.RenderModels.GetRenderModelCount() |> int
+
+                for i in 0 .. cnt - 1 do
+                    let name = Text.StringBuilder(4096)
+                    let len = OpenVR.RenderModels.GetRenderModelName(uint32 i, name, 4096u)
+                    if len > 0u then
+                        let name = name.ToString()
+                        let model = OpenVR.RenderModels.load name
+                        match model with
+                        | Some model -> yield name, model
+                        | _ -> ()
+            ]
+        )
+
+    let pulses = Dict<int, MicroTime>()
+    let mutable numFrames = 0
+    let mutable totalTime = MicroTime.Zero
+    let system = base.System.System
+
+    let deviceCache =
+        [|
+            for i in 0 .. int OpenVR.k_unMaxTrackedDeviceCount-1 do
+                yield getDevice system pulses i
+        |]
+
+
+    let removeDevice (i : int) =
+        if i >= 0 && i < deviceCache.Length then
+            lock deviceCache (fun () ->
+                let d = deviceCache.[i]
+                if d.kind <> VrDeviceKind.Invalid then
+                    Log.warn "disconnect %A"  d.kind
+                    deviceCache.[i] <- { d with kind = VrDeviceKind.Invalid }
+                    d.kind
+                else
+                    VrDeviceKind.Invalid
+            )
+        else
+            VrDeviceKind.Invalid
+
+    let rebuildDevice (i : int) =
+        if i >= 0 && i < deviceCache.Length then
+            lock deviceCache (fun () ->
+                let o = 
+                    let o = deviceCache.[i]
+                    if o.kind <> VrDeviceKind.Invalid then Some o
+                    else None
+
+                let d = getDevice system pulses i
+                deviceCache.[i] <- d
+                if d.kind = VrDeviceKind.Invalid then
+                    Log.warn "disconnect %A %A" (o |> Option.map (fun d -> d.kind)) d.kind
+                    o, None
+                else
+                    Log.warn "rebuild %A %A" (o |> Option.map (fun d -> d.kind)) d.kind
+                    o, Some d
+            )
+        else
+            None, None
+
+    let updateDevice (i : int) (f : VrDevice -> VrDevice) =
+        if i >= 0 && i < deviceCache.Length then
+            lock deviceCache (fun () ->
+                let o = deviceCache.[i]
+                let device = 
+                    if o.kind = VrDeviceKind.Invalid then
+                        let d = getDevice system pulses i
+                        deviceCache.[i] <- d
+                        if d.kind = VrDeviceKind.Invalid then
+                            None
+                        else
+                            Log.warn "connect %A"  d.kind
+                            Some d
+                    else
+                        Some o
+                
+                match device with
+                | Some d ->
+                    deviceCache.[i] <- f d
+                | None ->
+                    ()
+            )
+
+    let updateAxis (ci : int) (ai : int) (f : Axis -> Axis) =
+        updateDevice ci (fun d ->
+            { d with 
+                axis = d.axis |> HashMap.alter ai (fun old ->
+                    match old with
+                        | Some old ->
+                            Some (f old)
+                        | None ->
+                            None
+                )      
+            }
+        )
+
+    let updateButton (ci : int) (bi : int) (f : Button -> Button) =
+        updateDevice ci (fun d ->
+            { d with 
+                buttons = d.buttons |> HashMap.alter bi (fun old ->
+                    match old with
+                        | Some old ->
+                            Some (f old)
+                        | None ->
+                            None
+                )      
+            }
+        )
+
+    let getAxisIndex (b : VREvent_Controller_t) =
+        let d = int b.button - int EVRButtonId.k_EButton_Axis0
+        if d >= 0 && d < int OpenVR.k_unControllerStateAxisCount then
+            Some d 
+        else
+            None
+
+    let getState() =
+        lock deviceCache (fun () ->
+            let hmd = deviceCache |> Array.find (fun d -> d.kind = VrDeviceKind.Hmd)
+            let mutable w = 0u
+            let mutable h = 0u
+            system.GetRecommendedRenderTargetSize(&w,&h)
+            let size = adjustSize (V2i(int w, int h))
+
+            { 
+                runtime = this.Runtime
+                framebuffer = this.FramebufferSignature
+                display = { name = "HMD"; pose = hmd.pose }
+                devices = 
+                    deviceCache |> Array.choose (fun d -> 
+                        if d.kind <> VrDeviceKind.Invalid && d.kind <> VrDeviceKind.Hmd then
+                            Some (d.id, d)      
+                        else
+                            None 
+                    )
+                    |> HashMap.ofArray
+                renderTargetSize = size
+            }
+        )
+
+    let mutable loaded = false
+    let mutable state = { display = { name = "HMD"; pose = Pose.none }; devices = HashMap.empty; renderTargetSize = V2i.Zero; runtime = base.Runtime; framebuffer = base.FramebufferSignature }
+    let mstate = AdaptiveVrState.Create state
+    let sem = new SemaphoreSlim(1)
+    let _frameTime = AVal.init MicroTime.Zero
+    let _fps = AVal.init 0.0
+
+
+    let vrSystem =
+        {
+            signature   = base.FramebufferSignature
+            hmd         = PoseInfo.ofMotionState base.Hmd.MotionState
+            render      = base.Info
+            bounds      = base.Chaperone
+            state       = AdaptiveVrStateExtensions.toAbstract mstate _frameTime _fps
+        }
+
+    member x.UpdateFrameTime(time : MicroTime) =
+        _frameTime.Value <- time
+        _fps.Value <- (if time.TotalSeconds > 0.0 then 1.0 / time.TotalSeconds else 0.0)
+
+    member x.Statistics = base.Statistics
+
+    member x.SystemInfo = vrSystem
+
+    member x.SetApp(app : IMutableVrApp) =
+        lock x (fun () ->
+            currentApp <- app
+            match app.Scene with
+            | RuntimeCommand.RenderCmd objs-> 
+                x.RenderTask <- new Aardvark.Rendering.GL.RenderTasks.NewRenderTask(x.Runtime.ResourceManager, x.FramebufferSignature, objs, AVal.constant BackendConfiguration.Default, true, true)
+            | _ -> failwith "https://github.com/aardvark-platform/aardvark.rendering/issues/67"
+        )
+        
+    member x.State = getState()
+    member x.AllModels = allModels.Value
+
+
+    override x.Render() =
+        let start = sw.MicroTime
+
+        base.Render()
+
+        let now = sw.MicroTime
+
+        let dt = now - start
+        numFrames <- numFrames + 1
+        totalTime <- totalTime + dt
+
+        x.UpdateFrameTime(dt)
+        
+        if numFrames >= 30 then
+            numFrames <- 0
+            totalTime <- MicroTime.Zero
+
+
+        for (KeyValue(c, time)) in Seq.toList pulses do
+            if time > now then
+                system.TriggerHapticPulse(uint32 c, 0u, char 65535us)
+            else
+                pulses.Remove c |> ignore
+
+    override x.OnLoad(info) =
+        let res = base.OnLoad(info)
+        state <- getState()
+        transact (fun () -> mstate.Update(state))
+        loaded <- true
+        res
+
+    override x.UpdatePoses(poses : TrackedDevicePose_t[]) =
+        if loaded then
+            
+            transact (fun () ->
+                let changes = System.Collections.Generic.List<VrMessage>()
+                for i in 0 .. poses.Length - 1 do
+                    let mutable state = Unchecked.defaultof<VRControllerState_t>
+
+                    updateDevice i (fun d ->
+                        let mutable d = d
+                        if system.GetControllerState(uint32 i, &state, uint32 sizeof<VRControllerState_t>) then
+                            let value (ai : int) =
+                                match ai with
+                                    | 0 -> V2d(state.rAxis0.x, state.rAxis0.y)
+                                    | 1 -> V2d(state.rAxis1.x, state.rAxis1.y)
+                                    | 2 -> V2d(state.rAxis2.x, state.rAxis2.y)
+                                    | 3 -> V2d(state.rAxis3.x, state.rAxis3.y)
+                                    | 4 -> V2d(state.rAxis4.x, state.rAxis4.y)
+                                    | _ -> V2d.Zero
+
+                            d <- {
+                                d with
+                                    axis = d.axis |> HashMap.map (fun ai a -> 
+                                        let n = value ai
+                                        if a.value <> n then
+                                            changes.Add(ValueChange(i, ai, n))
+                                            { a with value = n }
+                                        else
+                                            a
+                                    ) 
+                            }
+                        let pose = Pose.ofOpenVR poses.[i]
+                        changes.Add(UpdatePose(i, pose))
+                        { d with pose = pose}
+                    )
+                    
+                if changes.Count > 0 then 
+                    changes |> Seq.iter currentApp.Input
+                state <- getState()
+                mstate.Update(state)
+            )
+
+    override x.ProcessEvent(evt : VREvent_t) =
+        if loaded then
+            
+            let eventType = evt.eventType |> int |> unbox<EVREventType>
+            match eventType with
+                | EVREventType.VREvent_TrackedDeviceRoleChanged | EVREventType.VREvent_TrackedDeviceUpdated ->
+                    let id = int evt.trackedDeviceIndex
+                    match rebuildDevice id with
+                    | None, Some n when n.kind = VrDeviceKind.Controller -> currentApp.Input (ControllerConnected id)
+                    | Some o, None when o.kind = VrDeviceKind.Controller -> currentApp.Input (ControllerDisconnected id)
+                    | _ -> ()
+                        
+                | EVREventType.VREvent_TrackedDeviceActivated ->
+                    let id = int evt.trackedDeviceIndex
+                    let mutable kind = VrDeviceKind.Invalid
+                    updateDevice id (fun d -> kind <- d.kind; d)
+                    if kind = VrDeviceKind.Controller then
+                        currentApp.Input (ControllerConnected id)
+
+                | EVREventType.VREvent_TrackedDeviceDeactivated ->
+                    let id = int evt.trackedDeviceIndex
+                    let oldKind = removeDevice id
+                    if oldKind = VrDeviceKind.Controller then
+                        currentApp.Input (ControllerDisconnected id)
+
+
+                | EVREventType.VREvent_ButtonTouch ->
+                    let ci = int evt.trackedDeviceIndex
+                    match getAxisIndex evt.data.controller with
+                        | Some ai when ci >= 0 -> 
+                            updateAxis ci ai (fun old -> { old with touched = true })
+                            //Log.line "[Aardvark.VR.App] Touching Axis %A" ai
+                            currentApp.Input (Touch(ci, ai))
+                        | _ -> ()
+
+                | EVREventType.VREvent_ButtonUntouch ->
+                    let ci = int evt.trackedDeviceIndex
+                    match getAxisIndex evt.data.controller with
+                        | Some ai when ci >= 0 -> 
+                            updateAxis ci ai (fun old -> { old with touched = false })
+                            currentApp.Input (Untouch(ci, ai))
+                        | _ -> ()
+                    
+                | EVREventType.VREvent_ButtonPress ->
+                    let ci = int evt.trackedDeviceIndex
+                    match getAxisIndex evt.data.controller with
+                        | Some ai when ci >= 0 -> 
+                            updateAxis ci ai (fun old -> { old with pressed = true })
+                            //Log.info "[Aardvark.VR.App] Pressing Axis %A" ai
+                            currentApp.Input (Press(ci, ai))
+                        | _ ->
+                            let bi = int evt.data.controller.button
+                            updateButton ci bi (fun old -> { old with pressed = true })
+                            currentApp.Input (PressButton(ci, bi))
+                            ()
+                    
+                | EVREventType.VREvent_ButtonUnpress ->
+                    let ci = int evt.trackedDeviceIndex
+                    match getAxisIndex evt.data.controller with
+                        | Some ai when ci >= 0 -> 
+                            updateAxis ci ai (fun old -> { old with pressed = false })
+                            currentApp.Input (Unpress(ci, ai))
+                        | _ ->
+                            let bi = int evt.data.controller.button
+                            updateButton ci bi (fun old -> { old with pressed = false })
+                            currentApp.Input (UnpressButton(ci, bi))
+
+                | _ ->
+                    ()
+
+            transact (fun () ->
+                state <- getState()
+                mstate.Update(state)
+            )
+        
+    member x.Start(mapp : IMutableVrApp) =
+        sem.Wait()
+        x.SetApp mapp
+        let thread = 
+            startThread (fun () ->
+                x.Run()
+            )
+
+        { new System.IDisposable with
+            member __.Dispose() =
+                mapp.Stop()
+                x.Shutdown()
+                thread.Join()
+                sem.Release() |> ignore
+        }
+
+    member x.Start(app : VrApp<'model, 'mmodel, 'msg>) =
+        let mapp = MutableVrApp.start app x.SystemInfo
+        x.Start(mapp)
+
+    interface IVrApplication with
+        member x.Start m = x.Start m
+        member x.SystemInfo = x.SystemInfo
+        member x.Runtime = x.Runtime :> IRuntime
+        member x.Size = x.Sizes 
+        member x.Kind = VRDisplayKind.OpenVR
+        member x.Statistics = x.Statistics
+
 open Aardvark.Application.Utilities
 type VulkanFakeVrApplication(samples : int, debug : bool) =
     let vulkanApp = new VulkanApplication(debug)
@@ -910,3 +1368,17 @@ module VRApplication =
         | VRDisplay.DisplayOpenVR adjust ->
             try new VulkanVRApplication(samples, debug, adjust) :> IVrApplication
             with _ -> new VulkanNoVrApplication(debug) :> IVrApplication
+
+    let create' (display : VRDisplay) (backend : Aardvark.Application.Backend) (samples : int) (debug : bool) =
+        match display, backend with
+        | VRDisplay.DisplayNone, Backend.Vulkan ->
+            new VulkanNoVrApplication(debug) :> IVrApplication
+        | VRDisplay.DisplayFake, Backend.Vulkan ->
+            new VulkanFakeVrApplication(samples, debug) :> IVrApplication
+        | VRDisplay.DisplayOpenVR adjust, Backend.Vulkan ->
+            try new VulkanVRApplication(samples, debug, adjust) :> IVrApplication
+            with _ -> new VulkanNoVrApplication(debug) :> IVrApplication
+        | VRDisplay.DisplayOpenVR adjust, Backend.GL ->
+            new GLVRApplication(samples, debug, adjust) :> IVrApplication
+
+
