@@ -974,7 +974,7 @@ type GLVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) as th
             currentApp <- app
             match app.Scene with
             | RuntimeCommand.RenderCmd objs-> 
-                x.RenderTask <- new Aardvark.Rendering.GL.RenderTasks.NewRenderTask(x.Runtime.ResourceManager, x.FramebufferSignature, objs, AVal.constant BackendConfiguration.Default, true, true)
+                x.RenderTask <- new Aardvark.Rendering.GL.RenderTasks.RenderTask(x.Runtime.ResourceManager, x.FramebufferSignature, objs, AVal.constant BackendConfiguration.Default, true, true)
             | _ -> failwith "https://github.com/aardvark-platform/aardvark.rendering/issues/67"
         )
         
@@ -1380,5 +1380,6 @@ module VRApplication =
             with _ -> new VulkanNoVrApplication(debug) :> IVrApplication
         | VRDisplay.DisplayOpenVR adjust, Backend.GL ->
             new GLVRApplication(samples, debug, adjust) :> IVrApplication
+        | _ -> failwith "display, backend combination not implemented"
 
 

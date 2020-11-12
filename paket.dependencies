@@ -28,6 +28,7 @@ nuget Aardvark.UI.Primitives   ~> 5.0.9
 
 nuget Aardvark.Cef            ~> 5.0.9
 nuget Aardvark.Cef.WinForms   ~> 5.0.9
+nuget Another.Unofficial.Xilium.CefGlue.UnpackNativeDependencies
 
 nuget Aardium            ~> 1.0.21
 
