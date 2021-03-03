@@ -14,6 +14,7 @@ open FSharp.Data.Adaptive
 type Message =
     | SetText of string 
     | ToggleVR
+    | UpdatePose
 
 module Demo =
     open Aardvark.UI.Primitives
@@ -45,6 +46,7 @@ module Demo =
         
     let update (state : VrState) (vr : VrActions) (model : Model) (msg : Message) =
         match msg with
+        | UpdatePose -> model
         | SetText t -> 
             { model with text = t }
         | ToggleVR ->
@@ -59,6 +61,8 @@ module Demo =
         match msg with
         | VrMessage.PressButton(_,1) ->
             [ToggleVR]
+        | VrMessage.UpdatePose(_,_) ->  
+            [UpdatePose]
         | _ -> 
             []
 

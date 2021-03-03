@@ -1,4 +1,4 @@
-framework: netstandard2.0, net471, netcoreapp2.0
+framework: netstandard2.0, net471, netcoreapp2.0, netcoreapp3.1
 source https://api.nuget.org/v3/index.json
 storage: none
 
@@ -23,11 +23,12 @@ nuget Aardvark.Rendering.Text            ~> 5.0.17
 nuget Aardvark.Application.Utilities     ~> 5.0.17
 
 
-nuget Aardvark.UI              ~> 5.0.9
-nuget Aardvark.UI.Primitives   ~> 5.0.9
+nuget Aardvark.UI              ~> 5.0.14
+nuget Aardvark.UI.Primitives   ~> 5.0.14
 
-nuget Aardvark.Cef            ~> 5.0.9
-nuget Aardvark.Cef.WinForms   ~> 5.0.9
+nuget Aardvark.Cef            ~> 5.0.14
+nuget Aardvark.Cef.WinForms   ~> 5.0.14
+
 nuget Another.Unofficial.Xilium.CefGlue.UnpackNativeDependencies
 
 nuget Aardium            ~> 1.0.21

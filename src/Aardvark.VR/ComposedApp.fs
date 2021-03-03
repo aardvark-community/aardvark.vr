@@ -47,7 +47,7 @@ module ComposedApp =
         let app =
             {
                 initial = capp.initial
-                update = capp.update vrapp.SystemInfo.state.Current info
+                update = fun m msg -> capp.update vrapp.SystemInfo.state.Current info m msg
                 view = capp.ui vrapp.SystemInfo
                 threads = capp.threads
                 unpersist = capp.unpersist
