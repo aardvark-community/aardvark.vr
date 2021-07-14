@@ -6,7 +6,7 @@ open Aardvark.UI
 open Aardvark.Base
 open Aardvark.SceneGraph
 open Aardvark.Application.OpenVR
-open Aardvark.Base.Rendering
+open Aardvark.Rendering
 open Aardvark.SceneGraph.Semantics
 open Aardvark.Base.Ag
 open System.Threading
@@ -116,18 +116,12 @@ type VrSystemInfo =
             ]
 
         let stencilTest =
-            StencilMode(
-                StencilOperation(
-                    StencilOperationFunction.Keep,
-                    StencilOperationFunction.Keep,
-                    StencilOperationFunction.Keep
-                ),
-                StencilFunction(
-                    StencilCompareFunction.Equal,
-                    0,
-                    0xFFFFFFFFu
-                )
-            )
+            { Pass = StencilOperation.Keep
+              Fail = StencilOperation.Keep
+              DepthFail = StencilOperation.Keep
+              Comparison = ComparisonFunction.Equal
+              CompareMask = StencilMask.All
+              Reference = 0 }
 
         Sg.UniformApplicator(uniforms, AVal.constant sg)
         |> Sg.stencilMode (AVal.constant stencilTest)
@@ -191,20 +185,15 @@ module MutableVrApp =
             ]
 
         let stencilTest =
-            StencilMode(
-                StencilOperation(
-                    StencilOperationFunction.Keep,
-                    StencilOperationFunction.Keep,
-                    StencilOperationFunction.Keep
-                ),
-                StencilFunction(
-                    StencilCompareFunction.Equal,
-                    0,
-                    0xFFFFFFFFu
-                )
-            )
+            { Pass = StencilOperation.Keep
+              Fail = StencilOperation.Keep
+              DepthFail = StencilOperation.Keep
+              Comparison = ComparisonFunction.Equal
+              CompareMask = StencilMask.All
+              Reference = 0 }
 
-        let scene = app.view mmodel info.state info.signature.Runtime uniforms stencilTest
+        let runtime = info.signature.Runtime :?> IRuntime
+        let scene = app.view mmodel info.state runtime uniforms stencilTest
 
         adjustThreads initialThreads
 

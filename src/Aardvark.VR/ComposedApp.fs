@@ -35,7 +35,7 @@ module ComposedApp =
     open Aardvark.Rendering.Text
     open Aardvark.SceneGraph
     open Aardvark.SceneGraph.Semantics
-    open Aardvark.Base.Rendering
+    open Aardvark.Rendering
 
 
     let start' (vrapp : IVrApplication) (startRunning : bool) (capp : ComposedApp<'model, 'mmodel, 'msg>) : MutableApp<'model,'msg> =

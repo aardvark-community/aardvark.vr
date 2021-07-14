@@ -6,7 +6,7 @@ namespace Aardvark.Vr
 //    open Aardvark.Base
 //    open Aardvark.Base.Ag
 //    open Aardvark.Base.Incremental
-//    open Aardvark.Base.Rendering
+//    open Aardvark.Rendering
 //    open Aardvark.SceneGraph
 //    open Aardvark.SceneGraph.Semantics
 //    open Aardvark.Rendering.Text

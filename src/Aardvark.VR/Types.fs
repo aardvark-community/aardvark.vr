@@ -5,6 +5,7 @@ open Valve.VR
 open Adaptify
 open FSharp.Data.Adaptive
 open Aardvark.Base
+open Aardvark.Rendering
 open Aardvark.SceneGraph
 
 [<ModelType>]

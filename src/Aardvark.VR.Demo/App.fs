@@ -18,7 +18,7 @@ type Message =
 
 module Demo =
     open Aardvark.UI.Primitives
-    open Aardvark.Base.Rendering
+    open Aardvark.Rendering
     
     let show  (att : list<string * AttributeValue<_>>) (sg : ISg<_>) =
 
