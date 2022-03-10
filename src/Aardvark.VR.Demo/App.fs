@@ -17,7 +17,6 @@ type Message =
     | UpdatePose
 
 module Demo =
-    open Aardvark.UI.Primitives
     open Aardvark.Rendering
     
     let show  (att : list<string * AttributeValue<_>>) (sg : ISg<_>) =
