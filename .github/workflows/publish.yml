@@ -21,6 +21,9 @@ jobs:
         run: dotnet tool restore
       - name: Restore
         run: dotnet paket restore
+      - name: Build
+        shell: cmd
+        run: dotnet build -c Release src\Aardvark.VR.sln
       - name: Pack
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
