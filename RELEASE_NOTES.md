@@ -1,3 +1,6 @@
+### 5.2.1
+- updated to Aardvark.Rendering 5.3
+
 ### 5.2.0
 - updated to Aardvark 5.2
 
