@@ -14,8 +14,9 @@
     <OutputPath>..\..\bin\Release\</OutputPath>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Types.fs" />
+    <None Include="paket.template" />
     <None Include="paket.references" />
+    <Compile Include="Types.fs" />
     <Compile Include="App.fs" />
     <Compile Include="ComposedApp.fs" />
     <Compile Include="Program.fs" />

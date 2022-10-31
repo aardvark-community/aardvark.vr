@@ -1,34 +1,30 @@
-framework: netstandard2.0, net471, netcoreapp3.1
+framework: auto-detect
 source https://api.nuget.org/v3/index.json
 storage: none
 
-nuget FSharp.Core                           >= 5.0.0 lowest_matching: true
-nuget Aardvark.Build                        ~> 1.0.11
+nuget FSharp.Core                           >= 5.0.1 lowest_matching: true
+nuget Aardvark.Build                        ~> 1.0.14
 
 nuget Aardvark.Base                         ~> 5.2.2
 nuget Aardvark.Base.Incremental             ~> 5.2.2
 nuget Aardvark.Base.FSharp                  ~> 5.2.2
 nuget Aardvark.Base.Essentials              ~> 5.2.2
 
-nuget Adaptify.Core                         ~> 1.1.1
-nuget Adaptify.MSBuild                      ~> 1.1.1
+nuget Adaptify.Core                         ~> 1.1.8
+nuget Adaptify.MSBuild                      ~> 1.1.8
 
 nuget FSharp.Data.Adaptive                  ~> 1.2.8
 
-nuget Aardvark.SceneGraph                   ~> 5.2.2
-nuget Aardvark.Application.OpenVR           ~> 5.2.2
-nuget Aardvark.Application.OpenVR.Vulkan    ~> 5.2.2
-nuget Aardvark.Application.Slim.Vulkan      ~> 5.2.2
-nuget Aardvark.Rendering.Text               ~> 5.2.2
-nuget Aardvark.Application.Utilities        ~> 5.2.2
+nuget Aardvark.SceneGraph                   ~> 5.3.0
+nuget Aardvark.Application.OpenVR           ~> 5.3.0
+nuget Aardvark.Application.OpenVR.Vulkan    ~> 5.3.0
+nuget Aardvark.Application.Slim.Vulkan      ~> 5.3.0
+nuget Aardvark.Rendering.Text               ~> 5.3.0
+nuget Aardvark.Application.Utilities        ~> 5.3.0
 
-nuget Aardvark.UI                           ~> 5.2.1
-nuget Aardvark.UI.Primitives                ~> 5.2.1
-nuget Aardvark.Cef                          ~> 5.2.1
-nuget Aardvark.Cef.WinForms                 ~> 5.2.1
+nuget Aardvark.UI                           ~> 5.3.5
+nuget Aardvark.UI.Primitives                ~> 5.3.5
 
 nuget Aardium                               ~> 2.0.8
 
 nuget Unofficial.OpenVR                     ~> 1.1.0
-
-nuget Another.Unofficial.Xilium.CefGlue.UnpackNativeDependencies
