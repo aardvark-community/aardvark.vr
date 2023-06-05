@@ -3,7 +3,7 @@ source https://api.nuget.org/v3/index.json
 storage: none
 
 nuget FSharp.Core                           >= 5.0.1 lowest_matching: true
-nuget Aardvark.Build                        ~> 1.0.14
+nuget Aardvark.Build                        ~> 1.0.20
 
 nuget Aardvark.Base                         ~> 5.2.2
 nuget Aardvark.Base.Incremental             ~> 5.2.2
@@ -15,15 +15,15 @@ nuget Adaptify.MSBuild                      ~> 1.1.8
 
 nuget FSharp.Data.Adaptive                  ~> 1.2.8
 
-nuget Aardvark.SceneGraph                   ~> 5.3.0
-nuget Aardvark.Application.OpenVR           ~> 5.3.0
-nuget Aardvark.Application.OpenVR.Vulkan    ~> 5.3.0
-nuget Aardvark.Application.Slim.Vulkan      ~> 5.3.0
-nuget Aardvark.Rendering.Text               ~> 5.3.0
-nuget Aardvark.Application.Utilities        ~> 5.3.0
+nuget Aardvark.SceneGraph                   ~> 5.4.0
+nuget Aardvark.Application.OpenVR           ~> 5.4.0
+nuget Aardvark.Application.OpenVR.Vulkan    ~> 5.4.0
+nuget Aardvark.Application.Slim.Vulkan      ~> 5.4.0
+nuget Aardvark.Rendering.Text               ~> 5.4.0
+nuget Aardvark.Application.Utilities        ~> 5.4.0
 
-nuget Aardvark.UI                           ~> 5.3.5
-nuget Aardvark.UI.Primitives                ~> 5.3.5
+nuget Aardvark.UI                           ~> 5.4.0
+nuget Aardvark.UI.Primitives                ~> 5.4.0
 
 nuget Aardium                               ~> 2.0.8
 
