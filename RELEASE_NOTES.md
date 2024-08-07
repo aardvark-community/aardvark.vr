@@ -1,3 +1,6 @@
+### 5.2.3
+- updated to NET 8 and Aardvark.Rendering 5.5
+
 ### 5.2.2
 - updated to Aardvark.Rendering 5.4
 
