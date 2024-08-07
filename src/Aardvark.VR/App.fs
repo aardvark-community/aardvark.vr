@@ -1195,7 +1195,8 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
 
     let uiThread = 
         lazy (
-            let t = new Thread(ThreadStart(run), IsBackground = true, ApartmentState = ApartmentState.STA)
+            let t = new Thread(ThreadStart(run), IsBackground = true)
+            t.SetApartmentState ApartmentState.STA
             t.Start()
             boot.Wait()
             boot.Dispose()

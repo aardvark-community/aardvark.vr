@@ -1,20 +1,11 @@
 FSharp.Core
 Aardvark.Build
-Aardvark.Base
-Aardvark.Base.Incremental
-Aardvark.Base.FSharp
 
-Aardvark.SceneGraph
-Aardvark.Application.OpenVR
 Aardvark.Application.OpenVR.Vulkan
-Aardvark.Rendering.Text
-Aardvark.Application.Slim.Vulkan
 Aardvark.Application.Utilities
 
 Aardvark.UI
 
-Unofficial.OpenVR
-
 Adaptify.MSBuild
 
-FSharp.Data.Adaptive
+Unofficial.OpenVR

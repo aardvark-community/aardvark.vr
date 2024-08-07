@@ -2,29 +2,27 @@ framework: auto-detect
 source https://api.nuget.org/v3/index.json
 storage: none
 
-nuget FSharp.Core                           >= 5.0.1 lowest_matching: true
-nuget Aardvark.Build                        ~> 1.0.20
+nuget FSharp.Core                           >= 8.0.0 lowest_matching: true
+nuget Aardvark.Build                        ~> 1.0.25
 
-nuget Aardvark.Base                         ~> 5.2.2
-nuget Aardvark.Base.Incremental             ~> 5.2.2
-nuget Aardvark.Base.FSharp                  ~> 5.2.2
-nuget Aardvark.Base.Essentials              ~> 5.2.2
+nuget Aardvark.Base                         ~> 5.3.0
+nuget Aardvark.Base.Incremental             ~> 5.3.0
+nuget Aardvark.Base.FSharp                  ~> 5.3.0
+nuget Aardvark.Base.Essentials              ~> 5.3.0
 
 nuget Adaptify.Core                         ~> 1.1.8
 nuget Adaptify.MSBuild                      ~> 1.1.8
 
-nuget FSharp.Data.Adaptive                  ~> 1.2.8
+nuget Aardvark.SceneGraph                   ~> 5.5.0
+nuget Aardvark.Application.OpenVR           ~> 5.5.0
+nuget Aardvark.Application.OpenVR.Vulkan    ~> 5.5.0
+nuget Aardvark.Application.Slim.Vulkan      ~> 5.5.0
+nuget Aardvark.Rendering.Text               ~> 5.5.0
+nuget Aardvark.Application.Utilities        ~> 5.5.0
 
-nuget Aardvark.SceneGraph                   ~> 5.4.0
-nuget Aardvark.Application.OpenVR           ~> 5.4.0
-nuget Aardvark.Application.OpenVR.Vulkan    ~> 5.4.0
-nuget Aardvark.Application.Slim.Vulkan      ~> 5.4.0
-nuget Aardvark.Rendering.Text               ~> 5.4.0
-nuget Aardvark.Application.Utilities        ~> 5.4.0
+nuget Aardvark.UI                           ~> 5.5.0
+nuget Aardvark.UI.Primitives                ~> 5.5.0
 
-nuget Aardvark.UI                           ~> 5.4.0
-nuget Aardvark.UI.Primitives                ~> 5.4.0
-
-nuget Aardium                               ~> 2.0.8
+nuget Aardium                               ~> 2.1.1
 
 nuget Unofficial.OpenVR                     ~> 1.1.0
