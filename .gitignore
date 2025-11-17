@@ -15,3 +15,4 @@ bin/Debug
 /src/Aardvark.VR.Demo/*.domaincache
 /.paket/Paket.Restore.targets
 .paket/.store
+**/.idea

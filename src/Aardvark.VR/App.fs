@@ -1,5 +1,6 @@
 ﻿namespace Aardvark.Vr
 
+open Aardvark.UI.ThreadPoolAdjustment
 open Valve.VR
 
 open Aardvark.UI
@@ -236,7 +237,7 @@ type IVrApplicationExtensions private() =
 
         
 type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) as this =
-    inherit VulkanVRApplicationLayered(samples, debug, adjustSize)
+    inherit VulkanVRApplicationLayered(debug, samples, adjustSize)
     
     let mutable currentApp = MutableVrApp.empty
         
@@ -691,7 +692,7 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
 
 
 type GLVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) as this =
-    inherit OpenGlVRApplicationLayered(samples, debug, adjustSize)
+    inherit OpenGlVRApplicationLayered(debug, adjustSize, samples)
     
     let mutable currentApp = MutableVrApp.empty
         
