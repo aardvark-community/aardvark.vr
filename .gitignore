@@ -16,3 +16,4 @@ bin/Debug
 /.paket/Paket.Restore.targets
 .paket/.store
 **/.idea
+**.DotSettings.user

@@ -38,8 +38,7 @@ module ComposedApp =
     open Aardvark.Rendering
 
 
-    let start' (vrapp : IVrApplication) (startRunning : bool) (capp : ComposedApp<'model, 'mmodel, 'msg>) : MutableApp<'model,'msg> =
-        let mutable vr = { new IDisposable with member x.Dispose() = () }
+    let start' (vrapp : IVrApplication) (startRunning : bool) (capp : ComposedApp<'model, 'mmodel, 'msg>) : MutableApp<'model,'mmodel,'msg> =
         let mutable start = id
         let mutable stop = id
         let info = { kind = vrapp.Kind; start = (fun () -> start()); stop = (fun () -> stop()) }
@@ -52,7 +51,8 @@ module ComposedApp =
                 threads = capp.threads
                 unpersist = capp.unpersist
             }
-        let mmodel, mapp = app.startAndGetState()
+        let mapp = app.start()
+        let mmodel = mapp.MutableModel
 
         let running = AVal.init false
 
@@ -95,7 +95,7 @@ module ComposedApp =
         //        } 
         //    )
 
-        let mutable vr = { new IDisposable with member x.Dispose() = () }
+        let mutable vr = Disposable.empty
 
         start <- fun () ->
             //kill.Value |> ignore
@@ -106,21 +106,18 @@ module ComposedApp =
                     new IMutableVrApp with
                         member x.Scene = RuntimeCommand.Render(objects)
                         member x.Stop() = ()
-                        member x.Input msg = mapp.update Guid.Empty (capp.input msg :> seq<_>)
+                        member x.Input msg = mapp.Update(Guid.Empty, capp.input msg)
                 }
 
         stop <- fun () ->
             transact (fun () -> running.Value <- false)
             vr.Dispose()
-            vr <- { new IDisposable with member x.Dispose() = () }
+            vr <- Disposable.empty
 
         if startRunning then start ()
-            
-        let shutdown() =
-            vr.Dispose()
-            mapp.shutdown()
 
-        { mapp with shutdown = shutdown }
+        mapp.Register { new IDisposable with member _.Dispose() = vr.Dispose() }
+        mapp
 
-    let start (vrapp : IVrApplication) (capp : ComposedApp<'model, 'mmodel, 'msg>) : MutableApp<'model,'msg> =
+    let start (vrapp : IVrApplication) (capp : ComposedApp<'model, 'mmodel, 'msg>) : MutableApp<'model,'mmodel,'msg> =
         start' vrapp false capp 

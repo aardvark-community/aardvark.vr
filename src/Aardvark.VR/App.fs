@@ -1,6 +1,5 @@
 ﻿namespace Aardvark.Vr
 
-open Aardvark.UI.ThreadPoolAdjustment
 open Valve.VR
 
 open Aardvark.UI

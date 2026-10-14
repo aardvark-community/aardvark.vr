@@ -1,25 +1,30 @@
 ﻿open Aardvark.Base
 open Aardvark.UI
+open Aardvark.UI.Giraffe
 open Aardvark.Vr
 open Aardium
 open Demo
-open Suave
 
 [<EntryPoint>]
 let main argv =
     Aardvark.Init()
-    Aardium.init()
+    Aardium.Init()
 
-    let app = VRApplication.create (VRDisplay.Fake) 8 false
-    let mapp = ComposedApp.start app Demo.app
-   
+    use app = VRApplication.create VRDisplay.Fake 8 false
+    use mapp = ComposedApp.start app Demo.app
     
-    WebPart.startServerLocalhost 4321 [
+    Server.startLocalhost 4321 mapp.CancellationToken [
         MutableApp.toWebPart app.Runtime mapp
     ] |> ignore
-    
+
     Aardium.run {
         url "http://localhost:4321"
+#if DEBUG
+        debug true
+        log (fun msg -> Report.Line(2, $"[Aardium] {msg}"))
+#else
+        debug false
+#endif
     }
 
     0
