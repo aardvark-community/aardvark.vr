@@ -1,3 +1,6 @@
+- Update to .NET 10
+- Update to Media 5.7
+
 ### 5.2.4
 - updated to Aardvark.Rendering 5.6
 
