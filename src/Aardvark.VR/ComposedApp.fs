@@ -37,7 +37,6 @@ module ComposedApp =
     open Aardvark.SceneGraph.Semantics
     open Aardvark.Rendering
 
-
     let start' (vrapp : IVrApplication) (startRunning : bool) (capp : ComposedApp<'model, 'mmodel, 'msg>) : MutableApp<'model,'mmodel,'msg> =
         let mutable start = id
         let mutable stop = id
@@ -64,7 +63,6 @@ module ComposedApp =
                 Sg.textWithConfig TextConfig.Default (AVal.constant "paused...")
                 |> Sg.scale 0.3333
                 |> Sg.transform (Trafo3d.FromBasis(V3d.IOO, V3d.OOI, -V3d.OIO, V3d(0.0, 0.0, 1.0)))
-                
 
         let realScene = 
             capp.vr vrapp.SystemInfo mmodel :> ISg
@@ -75,7 +73,6 @@ module ComposedApp =
             else
                 []
 
-
         let scene = 
             running 
             |> AVal.map (function true -> realScene | false -> emptyScene) 
@@ -85,20 +82,10 @@ module ComposedApp =
         scene?Runtime <- vrapp.Runtime
         scene?ViewportSize <- vrapp.Size
         let objects = scene.RenderObjects(Ag.Scope.Root)
-        //let kill = 
-        //    lazy (
-        //        vrapp.Start {
-        //            new IMutableVrApp with
-        //                member x.Scene = RuntimeCommand.Render(objects)
-        //                member x.Stop() = ()
-        //                member x.Input msg = mapp.update Guid.Empty (input msg :> seq<_>)
-        //        } 
-        //    )
 
         let mutable vr = Disposable.empty
 
         start <- fun () ->
-            //kill.Value |> ignore
             vr.Dispose()
             transact (fun () -> running.Value <- true)
             vr <- 
@@ -106,7 +93,7 @@ module ComposedApp =
                     new IMutableVrApp with
                         member x.Scene = RuntimeCommand.Render(objects)
                         member x.Stop() = ()
-                        member x.Input msg = mapp.Update(Guid.Empty, capp.input msg)
+                        member x.Input msg = mapp.Update(Guid.Empty, input msg)
                 }
 
         stop <- fun () ->

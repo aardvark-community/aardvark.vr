@@ -1149,63 +1149,98 @@ type GLVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) as th
 
 open Aardvark.Application.Utilities
 type VulkanFakeVrApplication(samples : int, debug : bool) =
-    let vulkanApp = new VulkanApplication(debug)
-
-    let boot = new SemaphoreSlim(0)
-
-    let win : ChangeableValue<Option<ISimpleRenderWindow>> = AVal.init None
+    let win : cval<ISimpleRenderWindow option> = AVal.init None
     let view = win |> AVal.bind (function Some w -> w.View | None -> AVal.constant [|Trafo3d.Identity; Trafo3d.Identity|])
     let proj = win |> AVal.bind (function Some w -> w.Proj | None -> AVal.constant [|Trafo3d.Identity; Trafo3d.Identity|])
     let size = win |> AVal.bind (function Some w -> w.Sizes | None -> AVal.constant V2i.II)
 
-    let tasks = new System.Collections.Concurrent.BlockingCollection<RuntimeCommand>(1)
-
-    let command = AVal.init RuntimeCommand.Empty
-
     let evtStatistics = EventSource<VrSystemStats>()
 
+    let getRuntime, start, shutdown =
+        let appLock = obj()
+        let command = MVar.empty()
+        let mutable vulkanApp = Unchecked.defaultof<VulkanApplication>
+        let mutable running = true
 
-    let run() =
-        let w = 
-            let s = samples
-            let d = debug
-            
-            window {
-                app vulkanApp
-                backend Backend.Vulkan
-                display Display.Stereo
-                debug d
-                samples s
-            }
-            
-        let obj = 
-            command |> AVal.map (fun c ->
-                [CommandRenderObject(RenderPass.main, Ag.Scope.Root, c) :> IRenderObject]
+        let getRuntime() =
+            lock appLock (fun _ ->
+                while isNull vulkanApp do
+                    Monitor.Wait appLock |> ignore
+
+                vulkanApp.Runtime :> IRuntime
             )
-        let sg = 
-            Sg.RenderObjectNode(ASet.ofAVal obj) :> ISg
-            
-        w.Scene <- sg
-        transact (fun () -> win.Value <- Some w)
-        boot.Release() |> ignore
-        
-        w.Run()
 
-        w.Dispose()
+        let run() =
+            lock appLock (fun _ ->
+                vulkanApp <- new VulkanApplication(debug)
+            )
 
-    let uiThread = 
-        lazy (
-            let t = new Thread(ThreadStart(run), IsBackground = true)
-            t.SetApartmentState ApartmentState.STA
-            t.Start()
-            boot.Wait()
-            boot.Dispose()
-            t
-        )
-    
+            let execute rdy cmd =
+                try
+                    use w =
+                        let s, d = samples, debug
+                        window {
+                            app vulkanApp
+                            backend Backend.Vulkan
+                            display Display.Stereo
+                            debug d
+                            samples s
+                        }
 
+                    let sg =
+                        let ro = CommandRenderObject(RenderPass.main, Scope.Root, cmd) :> IRenderObject
+                        ro |> ASet.single |> Sg.renderObjectSet
 
+                    w.Scene <- sg
+                    transact (fun _ -> win.Value <- Some w)
 
+                    // Create a disposable for the main thread that closes the GLFW window.
+                    // Note that we do not dispose the ISimpleRenderWindow directly as this would free rendering resources immediately.
+                    // Only dispose the GLFW window -> UI thread exits the event loop and disposes the resources.
+                    let dispose =
+                        match w.Control with
+                        | :? IDisposable as d ->
+                            let wref = WeakReference<_> d
+                            { new IDisposable with
+                                member _.Dispose() =
+                                    match wref.TryGetTarget() with
+                                    | true, w -> w.Dispose()
+                                    | _ -> () }
+
+                        | _ ->
+                            Log.warn "[VR] %A is not disposable" w.Control
+                            Disposable.empty
+
+                    MVar.put rdy dispose
+                    w.Run()
+
+                with exn ->
+                    Log.error "VulkanFakeVrApplication UI thread faulted: %A" exn
+
+            while Volatile.Read &running do
+                let cmd, rdy = MVar.take command
+                if Volatile.Read &running then execute rdy cmd
+
+            lock appLock (fun _ ->
+                win.Value |> Option.iter _.Dispose()
+                vulkanApp.Dispose()
+                vulkanApp <- Unchecked.defaultof<_>
+            )
+
+        let thread = Thread(ThreadStart(run), IsBackground = true)
+        thread.Start()
+
+        let start cmd =
+            let rdy = MVar.empty()
+            MVar.put command (cmd, rdy)
+            rdy.Take()
+
+        let shutdown() =
+            Volatile.Write(&running, false)
+            MVar.put command (Unchecked.defaultof<_>, Unchecked.defaultof<_>)
+            thread.Join()
+
+        getRuntime, start, shutdown
 
     let info =
         let mstate =
@@ -1216,7 +1251,7 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
                 member x.renderTargetSize = size.GetValue()
                 member x.frameTime = AVal.constant (MicroTime.FromMilliseconds 10.0)
                 member x.fps = AVal.constant 100.0
-                member x.runtime = vulkanApp.Runtime :> IRuntime
+                member x.runtime = getRuntime()
                 member x.signature = Unchecked.defaultof<_>
             }
         let size = V2i(1024, 768)
@@ -1243,21 +1278,13 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
 
     member x.Statistics = evtStatistics :> IEvent<_>
 
-    member x.Start(mapp : IMutableVrApp) =
-        uiThread.Value |> ignore
-        transact (fun () -> command.Value <- mapp.Scene)
-        { new IDisposable with
-            member x.Dispose() =
-                transact (fun () -> command.Value <- RuntimeCommand.Empty)
-        }
-
+    member x.Start(mapp : IMutableVrApp) : IDisposable =
+        start mapp.Scene
 
     member x.Dispose() =
-        tasks.CompleteAdding()
-        if uiThread.IsValueCreated then
-            uiThread.Value.Join()
+        shutdown()
 
-    member x.Runtime = vulkanApp.Runtime :> IRuntime
+    member x.Runtime = getRuntime()
     member x.Size = size
 
     interface IDisposable with
@@ -1266,7 +1293,7 @@ type VulkanFakeVrApplication(samples : int, debug : bool) =
     interface IVrApplication with
         member x.SystemInfo = x.SystemInfo
         member x.Start m = x.Start m
-        member x.Runtime = vulkanApp.Runtime :> IRuntime
+        member x.Runtime = getRuntime()
         member x.Size = size
         member x.Kind = VRDisplayKind.Fake
         member x.Statistics = x.Statistics 

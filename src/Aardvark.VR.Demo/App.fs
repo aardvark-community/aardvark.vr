@@ -105,15 +105,13 @@ module Demo =
             }
 
         div [ style "width: 100%; height: 100%" ] [
-            show [ style "width: 100%; height: 100%" ] (
+            show [ style "width: 100%; height: 100%"; RenderAttribute.samples 8 ] (
                 Sg.textWithConfig TextConfig.Default m.text
                 |> Sg.noEvents
                 |> Sg.andAlso stuff
             )
             textarea [ style "position: fixed; top: 5px; left: 5px"; onChange SetText ] m.text
             button [ style "position: fixed; bottom: 5px; right: 5px"; onClick (fun () -> ToggleVR) ] text
-
-
         ]
 
     let vr (info : VrSystemInfo) (m : AdaptiveModel) =
