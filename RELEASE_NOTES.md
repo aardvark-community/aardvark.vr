@@ -1,3 +1,4 @@
+### 5.3.0
 - Update to .NET 10
 - Update to Media 5.7
 - Update to Unofficial.OpenVR 2.0.0
