@@ -1,5 +1,6 @@
 - Update to .NET 10
 - Update to Media 5.7
+- Update to Unofficial.OpenVR 2.0.0
 - Fix `VRDisplay.Fake` mode
 
 ### 5.2.4

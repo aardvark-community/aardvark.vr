@@ -533,7 +533,7 @@ type VulkanVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) a
 
         for (KeyValue(c, time)) in Seq.toList pulses do
             if time > now then
-                system.TriggerHapticPulse(uint32 c, 0u, char 65535us)
+                system.TriggerHapticPulse(uint32 c, 0u, 65535us)
             else
                 pulses.Remove c |> ignore
 
@@ -991,7 +991,7 @@ type GLVRApplication(samples : int, debug : bool, adjustSize : V2i -> V2i) as th
 
         for (KeyValue(c, time)) in Seq.toList pulses do
             if time > now then
-                system.TriggerHapticPulse(uint32 c, 0u, char 65535us)
+                system.TriggerHapticPulse(uint32 c, 0u, 65535us)
             else
                 pulses.Remove c |> ignore
 
